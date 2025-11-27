@@ -22,14 +22,32 @@ struct Translation: Codable, Identifiable, Hashable {
 
 struct Variation: Codable, Identifiable, Hashable {
     var id = UUID()
-    var name: String      // e.g. "Bavarian Dialect"
-    var pronunciation: String // IPA
-    var location: String  // e.g. "Munich"
+    var name: String
+    var pronunciation: String
+    var location: String
     
     init(name: String = "", pronunciation: String = "", location: String = "") {
         self.name = name
         self.pronunciation = pronunciation
         self.location = location
+    }
+}
+
+// MARK: - Library Model
+@Model
+final class Library {
+    var name: String
+    var createdAt: Date
+    
+    @Relationship(deleteRule: .cascade, inverse: \Word.library)
+    var words: [Word]? = []
+    
+    @Relationship(deleteRule: .cascade, inverse: \Folder.library)
+    var folders: [Folder]? = []
+    
+    init(name: String) {
+        self.name = name
+        self.createdAt = Date()
     }
 }
 
@@ -41,13 +59,16 @@ final class Folder {
     var tags: [String] = []
     var createdAt: Date
     
+    var library: Library?
+    
     @Relationship(deleteRule: .nullify, inverse: \Word.folder)
     var words: [Word]? = []
     
-    init(name: String, icon: String = "folder", tags: [String] = []) {
+    init(name: String, icon: String = "folder", tags: [String] = [], library: Library? = nil) {
         self.name = name
         self.icon = icon
         self.tags = tags
+        self.library = library
         self.createdAt = Date()
     }
 }
@@ -62,17 +83,17 @@ final class Word {
     var example: String
     var notes: String
     
-    // Complex Data
     var translations: [Translation] = []
-    var variations: [Variation] = []    // NEW: Regional variations
-    var tags: [String] = []             // Folder tags
-    var locationTags: [String] = []     // NEW: Location sorting tags
+    var variations: [Variation] = []
+    var tags: [String] = []
+    var locationTags: [String] = []
     
     @Attribute(.externalStorage)
     var imageData: Data?
     
     var createdAt: Date
     var folder: Folder?
+    var library: Library?
     
     init(term: String = "",
          pronunciation: String = "",
@@ -85,7 +106,8 @@ final class Word {
          tags: [String] = [],
          locationTags: [String] = [],
          imageData: Data? = nil,
-         folder: Folder? = nil) {
+         folder: Folder? = nil,
+         library: Library? = nil) {
         self.term = term
         self.pronunciation = pronunciation
         self.definition = definition
@@ -98,11 +120,11 @@ final class Word {
         self.locationTags = locationTags
         self.imageData = imageData
         self.folder = folder
+        self.library = library
         self.createdAt = Date()
     }
 }
 
-// Export Helper
 struct WordExport: Codable {
     let term: String
     let pronunciation: String
@@ -116,4 +138,5 @@ struct WordExport: Codable {
     let locationTags: [String]
     let imageData: Data?
     let folderName: String?
+    let libraryName: String?
 }

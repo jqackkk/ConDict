@@ -11,6 +11,7 @@ import SwiftData
 struct ConDictApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
+            Library.self,
             Word.self,
             Folder.self
         ])

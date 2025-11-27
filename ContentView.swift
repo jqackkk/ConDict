@@ -16,8 +16,13 @@ let speechSynthesizer = AVSpeechSynthesizer()
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     
-    @Query(sort: \Word.term) private var words: [Word]
-    @Query(sort: \Folder.name) private var folders: [Folder]
+    // FETCH LIBRARIES
+    @Query(sort: \Library.name) private var libraries: [Library]
+    @State private var selectedLibraryID: PersistentIdentifier?
+    @State private var showAllWordsGlobal: Bool = false
+    
+    @Query(sort: \Word.term) private var allWords: [Word]
+    @Query(sort: \Folder.name) private var allFolders: [Folder]
     
     // Global Settings
     @AppStorage("selectedVoiceID") var selectedVoiceID: String = ""
@@ -31,21 +36,18 @@ struct ContentView: View {
     
     @State private var isShowingAddSheet = false
     @State private var isShowingFolderSheet = false
+    @State private var isShowingLibrarySheet = false
     @State private var isShowingExport = false
     @State private var document: JSONDocument?
     
-    @State private var newFolderName = ""
+    @State private var newName = ""
     @State private var newFolderTags = ""
     
     var partsOfSpeech = ["All", "Noun", "Verb", "Adjective", "Adverb", "Pronoun", "Particle", "Conjunction", "Interjection", "Other"]
     
-    // Font Helper
     func getCustomFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        if selectedFont == "System" {
-            return .system(size: size, weight: weight, design: .serif)
-        } else {
-            return .custom(selectedFont, size: size).weight(weight)
-        }
+        if selectedFont == "System" { return .system(size: size, weight: weight, design: .serif) }
+        else { return .custom(selectedFont, size: size).weight(weight) }
     }
     
     var colorScheme: ColorScheme? {
@@ -56,81 +58,116 @@ struct ContentView: View {
         }
     }
     
+    // COMPUTED LISTS
+    var currentLibrary: Library? {
+        if showAllWordsGlobal { return nil }
+        if let id = selectedLibraryID {
+            return libraries.first(where: { $0.persistentModelID == id })
+        }
+        return libraries.first
+    }
+    
+    var visibleWords: [Word] {
+        if showAllWordsGlobal { return allWords }
+        guard let lib = currentLibrary else { return [] }
+        return allWords.filter { $0.library == lib }
+    }
+    
+    var visibleFolders: [Folder] {
+        guard let lib = currentLibrary else { return [] }
+        return allFolders.filter { $0.library == lib }
+    }
+    
     var filteredWords: [Word] {
-        let folderFiltered = selectedFolder == nil ? words : words.filter { $0.folder == selectedFolder }
-        
-        // 1. Filter by Search Text
+        let baseList = selectedFolder == nil ? visibleWords : visibleWords.filter { $0.folder == selectedFolder }
         let searchFiltered: [Word]
-        if searchText.isEmpty {
-            searchFiltered = folderFiltered
-        } else {
-            searchFiltered = folderFiltered.filter { word in
+        if searchText.isEmpty { searchFiltered = baseList }
+        else {
+            searchFiltered = baseList.filter { word in
                 word.term.localizedCaseInsensitiveContains(searchText) ||
                 word.definition.localizedCaseInsensitiveContains(searchText) ||
                 word.locationTags.contains { $0.localizedCaseInsensitiveContains(searchText) }
             }
         }
-        
-        // 2. Filter by Part of Speech
-        if selectedFilter == "All" {
-            return searchFiltered
-        } else {
-            return searchFiltered.filter { $0.partOfSpeech == selectedFilter }
-        }
+        if selectedFilter == "All" { return searchFiltered }
+        else { return searchFiltered.filter { $0.partOfSpeech == selectedFilter } }
     }
 
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedWord) {
-                Section("Library") {
-                    Button(action: { selectedFolder = nil }) {
-                        Label("All Words", systemImage: "tray.full")
-                            .padding(.vertical, 4)
+                
+                // MARK: - LIBRARIES
+                Section("Libraries") {
+                    Button(action: {
+                        showAllWordsGlobal = true
+                        selectedLibraryID = nil
+                        selectedFolder = nil
+                    }) {
+                        Label("All Words", systemImage: "tray.2.fill")
+                            .foregroundStyle(showAllWordsGlobal ? Color.accentColor : .primary)
                     }
                     .buttonStyle(.plain)
-                    .tag(nil as Folder?)
-                }
-                
-                Section("Folders") {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 10) {
-                        ForEach(folders) { folder in
-                            Button(action: { selectedFolder = folder }) {
-                                VStack {
-                                    Image(systemName: folder.icon)
-                                        .font(.title2)
-                                        .foregroundStyle(selectedFolder == folder ? .white : Color.accentColor)
-                                    Text(folder.name)
-                                        .font(.caption)
-                                        .lineLimit(1)
-                                        .foregroundStyle(selectedFolder == folder ? .white : .primary)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(10)
-                                .background(selectedFolder == folder ? Color.accentColor : Color.gray.opacity(0.1))
-                                .cornerRadius(8)
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu { Button("Delete", role: .destructive) { deleteFolder(folder) } }
-                        }
-                        
+                    
+                    ForEach(libraries) { lib in
                         Button(action: {
-                            newFolderName = ""; newFolderTags = ""; isShowingFolderSheet = true
+                            showAllWordsGlobal = false
+                            selectedLibraryID = lib.persistentModelID
+                            selectedFolder = nil
                         }) {
-                            VStack {
-                                Image(systemName: "plus").font(.title2).foregroundStyle(.secondary)
-                                Text("New").font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                Image(systemName: "books.vertical.fill")
+                                    .foregroundStyle(selectedLibraryID == lib.persistentModelID ? Color.accentColor : .primary)
+                                
+                                Text(lib.name)
+                                    .foregroundStyle(selectedLibraryID == lib.persistentModelID ? Color.accentColor : .primary)
+                                    .fontWeight(selectedLibraryID == lib.persistentModelID ? .semibold : .regular)
+                                Spacer()
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(10)
-                            .background(Color.clear)
-                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5])).foregroundStyle(.secondary.opacity(0.5)))
                         }
                         .buttonStyle(.plain)
+                        .contextMenu { Button("Delete Library", role: .destructive) { modelContext.delete(lib) } }
                     }
-                    .padding(.vertical, 5)
+                    
+                    Button("New Library...") { newName = ""; isShowingLibrarySheet = true }
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 4)
                 }
                 
-                Section(selectedFolder?.name ?? "All Words") {
+                // MARK: - FOLDERS
+                if currentLibrary != nil {
+                    Section("Folders") {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 10) {
+                            ForEach(visibleFolders) { folder in
+                                Button(action: { selectedFolder = folder }) {
+                                    VStack {
+                                        Image(systemName: folder.icon).font(.title2).foregroundStyle(selectedFolder == folder ? .white : Color.accentColor)
+                                        Text(folder.name).font(.caption).lineLimit(1).foregroundStyle(selectedFolder == folder ? .white : .primary)
+                                    }
+                                    .frame(maxWidth: .infinity).padding(10)
+                                    .background(selectedFolder == folder ? Color.accentColor : Color.gray.opacity(0.1))
+                                    .cornerRadius(8)
+                                }
+                                .buttonStyle(.plain)
+                                .contextMenu { Button("Delete", role: .destructive) { deleteFolder(folder) } }
+                            }
+                            Button(action: { newName = ""; newFolderTags = ""; isShowingFolderSheet = true }) {
+                                VStack {
+                                    Image(systemName: "plus").font(.title2).foregroundStyle(.secondary)
+                                    Text("New").font(.caption).foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity).padding(10)
+                                .background(Color.clear)
+                                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5])).foregroundStyle(.secondary.opacity(0.5)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 5)
+                    }
+                }
+                
+                // MARK: - WORDS
+                Section(selectedFolder?.name ?? (showAllWordsGlobal ? "All Words" : (currentLibrary?.name ?? "Library"))) {
                     ForEach(filteredWords) { word in
                         NavigationLink(value: word) {
                             VStack(alignment: .leading) {
@@ -146,6 +183,19 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 220, ideal: 250)
             .searchable(text: $searchText, placement: .sidebar)
             
+            // MARK: - FOOTER STATS
+            .safeAreaInset(edge: .bottom) {
+                HStack {
+                    Text("\(filteredWords.count) Words")
+                    Spacer()
+                    if let folder = selectedFolder { Text(folder.name) }
+                    else if showAllWordsGlobal { Text("Global") }
+                    else { Text(currentLibrary?.name ?? "") }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .padding().background(.regularMaterial)
+            }
+            
         } detail: {
             if let word = selectedWord {
                 WordDetailContainer(word: word, selectedVoiceID: selectedVoiceID, selectedFont: selectedFont)
@@ -158,16 +208,15 @@ struct ContentView: View {
             ToolbarItem(placement: .automatic) {
                 Menu {
                     Picker("Filter", selection: $selectedFilter) {
-                        ForEach(partsOfSpeech, id: \.self) { type in
-                            Text(type).tag(type)
-                        }
+                        ForEach(partsOfSpeech, id: \.self) { type in Text(type).tag(type) }
                     }
-                } label: {
-                    Label("Filter", systemImage: selectedFilter == "All" ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-                }
+                } label: { Label("Filter", systemImage: selectedFilter == "All" ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill") }
             }
             ToolbarItem(placement: .primaryAction) {
-                Button(action: { newFolderName = ""; newFolderTags = ""; isShowingFolderSheet = true }) { Label("New Folder", systemImage: "folder.badge.plus") }
+                Button(action: { newName = ""; newFolderTags = ""; isShowingFolderSheet = true }) {
+                    Label("New Folder", systemImage: "folder.badge.plus")
+                }
+                .disabled(showAllWordsGlobal || currentLibrary == nil)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: { isShowingAddSheet = true }) { Label("Add Word", systemImage: "plus") }
@@ -177,12 +226,12 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $isShowingAddSheet) {
-            AddWordView(targetFolder: selectedFolder).preferredColorScheme(colorScheme)
+            AddWordView(targetFolder: selectedFolder, targetLibrary: currentLibrary).preferredColorScheme(colorScheme)
         }
         .sheet(isPresented: $isShowingFolderSheet) {
             NavigationStack {
                 Form {
-                    TextField("Folder Name", text: $newFolderName)
+                    TextField("Folder Name", text: $newName)
                     TextField("Tags (comma separated)", text: $newFolderTags)
                 }
                 .navigationTitle("New Folder")
@@ -191,18 +240,47 @@ struct ContentView: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Create") {
                             let tags = newFolderTags.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-                            let newFolder = Folder(name: newFolderName, tags: tags)
+                            let newFolder = Folder(name: newName, tags: tags, library: currentLibrary)
                             modelContext.insert(newFolder)
                             isShowingFolderSheet = false
                         }
-                        .disabled(newFolderName.isEmpty)
+                        .disabled(newName.isEmpty)
                     }
                 }
-                .frame(width: 400, height: 200)
             }
+            .frame(width: 400, height: 200)
+        }
+        .sheet(isPresented: $isShowingLibrarySheet) {
+            NavigationStack {
+                Form { TextField("Library Name", text: $newName) }
+                .navigationTitle("New Library")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { isShowingLibrarySheet = false } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Create") {
+                            let lib = Library(name: newName)
+                            modelContext.insert(lib)
+                            selectedLibraryID = lib.persistentModelID
+                            showAllWordsGlobal = false
+                            isShowingLibrarySheet = false
+                        }
+                        .disabled(newName.isEmpty)
+                    }
+                }
+            }
+            .frame(width: 300, height: 150)
         }
         .fileExporter(isPresented: $isShowingExport, document: document, contentType: .json, defaultFilename: "ConDict_Export") { result in
             if case .success(let url) = result { print("Saved to \(url)") }
+        }
+        .onAppear {
+            if libraries.isEmpty {
+                let defaultLib = Library(name: "My Dictionary")
+                modelContext.insert(defaultLib)
+                selectedLibraryID = defaultLib.persistentModelID
+            } else if selectedLibraryID == nil {
+                selectedLibraryID = libraries.first?.persistentModelID
+            }
         }
     }
 
@@ -221,11 +299,11 @@ struct ContentView: View {
     }
     
     private func prepareExport() {
-        let exportData = words.map {
+        let exportData = allWords.map {
             WordExport(
                 term: $0.term, pronunciation: $0.pronunciation, definition: $0.definition, partOfSpeech: $0.partOfSpeech,
                 example: $0.example, notes: $0.notes, translations: $0.translations, variations: $0.variations,
-                tags: $0.tags, locationTags: $0.locationTags, imageData: $0.imageData, folderName: $0.folder?.name
+                tags: $0.tags, locationTags: $0.locationTags, imageData: $0.imageData, folderName: $0.folder?.name, libraryName: $0.library?.name
             )
         }
         if let data = try? JSONEncoder().encode(exportData) {
@@ -245,7 +323,7 @@ struct WordDetailContainer: View {
     var body: some View {
         Group {
             if isEditing {
-                WordEditForm(word: word)
+                WordEditForm(word: word, selectedFont: selectedFont) // Passed font
             } else {
                 WordDisplayView(word: word, voiceID: selectedVoiceID, selectedFont: selectedFont)
             }
@@ -260,18 +338,14 @@ struct WordDetailContainer: View {
 
 // MARK: - Display View
 struct WordDisplayView: View {
-    let word: Word // Use 'let' here, changes come from parent
+    let word: Word
     let voiceID: String
     let selectedFont: String
-    
     @State private var activePopover: UUID?
     
     func getCustomFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        if selectedFont == "System" {
-            return .system(size: size, weight: weight, design: .serif)
-        } else {
-            return .custom(selectedFont, size: size).weight(weight)
-        }
+        if selectedFont == "System" { return .system(size: size, weight: weight, design: .serif) }
+        else { return .custom(selectedFont, size: size).weight(weight) }
     }
     
     var body: some View {
@@ -302,7 +376,14 @@ struct WordDisplayView: View {
                                     Text("#\(tag)").font(.caption).padding(4).background(Color.gray.opacity(0.1)).cornerRadius(4)
                                 }
                                 ForEach(word.locationTags, id: \.self) { loc in
-                                    Text("📍\(loc)").font(.caption).padding(4).background(Color.red.opacity(0.1)).foregroundStyle(.red).cornerRadius(4)
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "mappin").font(.caption2)
+                                        Text(loc).font(.caption)
+                                    }
+                                    .padding(4)
+                                    .background(Color.accentColor)
+                                    .foregroundStyle(.white)
+                                    .cornerRadius(4)
                                 }
                             }
                         }
@@ -323,7 +404,7 @@ struct WordDisplayView: View {
                         }
                     }
                     
-                    // VARIATIONS (Fixed Popover Style)
+                    // VARIATIONS
                     if !word.variations.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             Label("Variations", systemImage: "map.fill").font(.headline).foregroundStyle(.secondary)
@@ -340,19 +421,11 @@ struct WordDisplayView: View {
                                                     .font(.title3)
                                             }
                                             .buttonStyle(.plain)
-                                            .popover(isPresented: Binding(
-                                                get: { activePopover == variant.id },
-                                                set: { if !$0 { activePopover = nil } }
-                                            ), arrowEdge: .bottom) {
+                                            .popover(isPresented: Binding(get: { activePopover == variant.id }, set: { if !$0 { activePopover = nil } }), arrowEdge: .bottom) {
                                                 VStack(alignment: .leading, spacing: 4) {
-                                                    Text("Location")
-                                                        .font(.caption)
-                                                        .foregroundStyle(.secondary)
-                                                    Text(variant.location)
-                                                        .font(.headline)
-                                                }
-                                                .padding()
-                                                .frame(minWidth: 150)
+                                                    Text("Location").font(.caption).foregroundStyle(.secondary)
+                                                    Text(variant.location).font(.headline)
+                                                }.padding().frame(minWidth: 150)
                                             }
                                         }
                                         HStack {
@@ -372,7 +445,7 @@ struct WordDisplayView: View {
                         }
                     }
                     
-                    // TRANSLATIONS (Display - Ensure this is present)
+                    // TRANSLATIONS
                     if !word.translations.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             Label("Translations", systemImage: "globe").font(.headline).foregroundStyle(.secondary)
@@ -385,19 +458,17 @@ struct WordDisplayView: View {
                                         }
                                         Spacer()
                                         Button(action: { speak(trans.text) }) {
-                                            Image(systemName: "speaker.wave.1").font(.caption).foregroundStyle(.blue)
+                                            Image(systemName: "speaker.wave.1").font(.caption).foregroundStyle(Color.accentColor)
                                         }
                                         .buttonStyle(.plain)
                                     }
-                                    .padding(10)
-                                    .background(Color.gray.opacity(0.1))
-                                    .cornerRadius(8)
+                                    .padding(10).background(Color.gray.opacity(0.1)).cornerRadius(8)
                                 }
                             }
                         }
                     }
                     
-                    // Notes
+                    // NOTES
                     if !word.notes.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Label("Notes", systemImage: "note.text").font(.headline).foregroundStyle(.secondary)
@@ -406,14 +477,8 @@ struct WordDisplayView: View {
                     }
                 }
                 
-                // Image
                 if let imageData = word.imageData, let nsImage = NSImage(data: imageData) {
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 250, height: 250)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .shadow(radius: 4)
+                    Image(nsImage: nsImage).resizable().aspectRatio(contentMode: .fill).frame(width: 250, height: 250).clipShape(RoundedRectangle(cornerRadius: 12)).shadow(radius: 4)
                 }
             }
             .padding(40)
@@ -425,7 +490,11 @@ struct WordDisplayView: View {
         if !isIPA {
             if let scalar = text.unicodeScalars.first, scalar.value >= 0x0400 && scalar.value <= 0x04FF {
                 utterance.voice = AVSpeechSynthesisVoice(language: "ru-RU")
-            } else if !voiceID.isEmpty {
+            }
+            else if let scalar = text.unicodeScalars.first, scalar.value >= 0x4E00 && scalar.value <= 0x9FFF {
+                utterance.voice = AVSpeechSynthesisVoice(language: "zh-CN")
+            }
+            else if !voiceID.isEmpty {
                 utterance.voice = AVSpeechSynthesisVoice(identifier: voiceID)
             }
         } else {
@@ -438,10 +507,16 @@ struct WordDisplayView: View {
 // MARK: - Edit Form
 struct WordEditForm: View {
     @Bindable var word: Word
+    var selectedFont: String // Receive Font Name
     @Query private var folders: [Folder]
     @State private var selectedItem: PhotosPickerItem?
     
     let partsOfSpeech = ["Noun", "Verb", "Adjective", "Adverb", "Pronoun", "Particle", "Conjunction", "Interjection", "Other"]
+    
+    func getCustomFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        if selectedFont == "System" { return .system(size: size, weight: weight, design: .serif) }
+        else { return .custom(selectedFont, size: size).weight(weight) }
+    }
 
     var body: some View {
         ScrollView {
@@ -449,7 +524,11 @@ struct WordEditForm: View {
                 VStack(alignment: .leading, spacing: 20) {
                     // Header
                     VStack(alignment: .leading, spacing: 12) {
-                        TextField("Term", text: $word.term).font(.system(size: 48, weight: .bold, design: .serif)).textFieldStyle(.plain)
+                        // FIXED: Uses custom font & bold
+                        TextField("Term", text: $word.term)
+                            .font(getCustomFont(size: 48, weight: .bold))
+                            .textFieldStyle(.plain)
+                        
                         HStack {
                             TextField("IPA", text: $word.pronunciation).font(.system(.title3, design: .monospaced)).textFieldStyle(.plain)
                             Picker("", selection: $word.partOfSpeech) {
@@ -468,7 +547,7 @@ struct WordEditForm: View {
                     }
                     Divider()
                     
-                    // Definition
+                    // Definition + Underline
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Label("Definition", systemImage: "book.closed").font(.headline).foregroundStyle(.secondary)
@@ -476,35 +555,42 @@ struct WordEditForm: View {
                             HStack(spacing: 2) {
                                 Button(action: { word.definition += "**bold**" }) { Image(systemName: "bold") }
                                 Button(action: { word.definition += "*italic*" }) { Image(systemName: "italic") }
+                                Button(action: { word.definition += "<u>underline</u>" }) { Image(systemName: "underline") }
                                 Button(action: { word.definition += "~strike~" }) { Image(systemName: "strikethrough") }
                             }.buttonStyle(.borderless).controlSize(.small)
                         }
                         TextField("Definition (Markdown)", text: $word.definition, axis: .vertical).font(.title3).lineSpacing(4).textFieldStyle(.plain).padding(10).background(Color.gray.opacity(0.1)).cornerRadius(8)
                     }
                     
-                    // VARIATIONS (Edit)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Example", systemImage: "quote.opening").font(.headline).foregroundStyle(.secondary)
+                        TextField("Example Sentence", text: $word.example, axis: .vertical).font(.system(.body, design: .serif)).italic().textFieldStyle(.plain).padding(10).background(Color.gray.opacity(0.1)).cornerRadius(8)
+                    }
+                    
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Label("Variations", systemImage: "map.fill").font(.headline).foregroundStyle(.secondary)
                             Spacer()
                             Button("Add") { word.variations.append(Variation()) }
                         }
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180))], spacing: 10) {
+                        VStack(spacing: 10) {
                             ForEach($word.variations) { $varItem in
-                                VStack(spacing: 6) {
-                                    TextField("Name (e.g. Dialect)", text: $varItem.name).font(.headline)
-                                    TextField("IPA", text: $varItem.pronunciation).font(.caption).foregroundStyle(.secondary)
-                                    TextField("Location", text: $varItem.location).font(.caption).foregroundStyle(.blue)
+                                HStack(spacing: 8) {
+                                    TextField("Name", text: $varItem.name)
+                                    Divider()
+                                    TextField("IPA", text: $varItem.pronunciation)
+                                    Divider()
+                                    TextField("Loc", text: $varItem.location)
+                                    
                                     Button(role: .destructive) {
                                         if let idx = word.variations.firstIndex(where: { $0.id == varItem.id }) { word.variations.remove(at: idx) }
-                                    } label: { Image(systemName: "trash").font(.caption) }.buttonStyle(.plain)
+                                    } label: { Image(systemName: "trash") }.buttonStyle(.plain)
                                 }
                                 .padding(10).background(Color.gray.opacity(0.1)).cornerRadius(8)
                             }
                         }
                     }
                     
-                    // TRANSLATIONS (Edit)
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Label("Translations", systemImage: "globe").font(.headline).foregroundStyle(.secondary)
@@ -522,9 +608,20 @@ struct WordEditForm: View {
                             }
                         }
                     }
+                    
+                    // FIXED: Restored Notes Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Notes", systemImage: "note.text")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        TextField("Etymology / Usage Notes", text: $word.notes, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .padding(10)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                    }
                 }
                 
-                // Image Picker
                 VStack {
                     if let imageData = word.imageData, let nsImage = NSImage(data: imageData) {
                         Image(nsImage: nsImage).resizable().aspectRatio(contentMode: .fill).frame(width: 200, height: 200).clipShape(RoundedRectangle(cornerRadius: 8))
@@ -545,6 +642,7 @@ struct AddWordView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     var targetFolder: Folder?
+    var targetLibrary: Library?
     
     @State private var term = ""; @State private var pronunciation = ""; @State private var definition = ""
     @State private var partOfSpeech = "Noun"; @State private var example = ""; @State private var notes = ""
@@ -569,6 +667,7 @@ struct AddWordView: View {
                         HStack {
                             Button("B") { definition += "**" }.fontWeight(.bold)
                             Button("I") { definition += "*" }.italic()
+                            Button("U") { definition += "<u>" }.underline()
                             Button("S") { definition += "~" }.strikethrough()
                             Spacer()
                         }.buttonStyle(.borderless)
@@ -576,14 +675,18 @@ struct AddWordView: View {
                         TextField("Example", text: $example, axis: .vertical).font(.system(.body, design: .serif)).italic()
                     }
                     Section("Variations") {
-                        ForEach($variations) { $v in
-                            HStack { TextField("Name", text: $v.name); TextField("Loc", text: $v.location) }
-                        }
+                        ForEach($variations) { $v in HStack { TextField("Name", text: $v.name); TextField("Loc", text: $v.location) } }
                         Button("Add Variation") { variations.append(Variation()) }
                     }
                     Section("Translations") {
                         ForEach($translations) { $t in HStack { TextField("Lang", text: $t.language).frame(width: 60); TextField("Text", text: $t.text) } }
                         Button("Add Translation") { translations.append(Translation()) }
+                    }
+                    
+                    // FIXED: Restored Notes Section
+                    Section("Notes") {
+                        TextField("Etymology / Usage Notes", text: $notes, axis: .vertical)
+                            .lineLimit(3...6)
                     }
                 }.formStyle(.grouped)
                 VStack {
@@ -606,7 +709,7 @@ struct AddWordView: View {
     
     private func saveWord() {
         let locs = locationTags.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-        let newWord = Word(term: term, pronunciation: pronunciation, definition: definition, partOfSpeech: partOfSpeech, example: example, notes: notes, translations: translations, variations: variations, tags: targetFolder?.tags ?? [], locationTags: locs, imageData: imageData, folder: targetFolder)
+        let newWord = Word(term: term, pronunciation: pronunciation, definition: definition, partOfSpeech: partOfSpeech, example: example, notes: notes, translations: translations, variations: variations, tags: targetFolder?.tags ?? [], locationTags: locs, imageData: imageData, folder: targetFolder, library: targetLibrary)
         modelContext.insert(newWord)
         dismiss()
     }
