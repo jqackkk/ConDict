@@ -1,21 +1,36 @@
-MIT License
+CONDICT SOURCE CODE LICENSE AGREEMENT
+Version 1.0
 
-Copyright (c) 2025 jqackkk
+Copyright (c) 2025 jqackkk. All Rights Reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. DEFINITIONS
+"Licensor" refers to the copyright holder, jqackkk.
+"Software" refers to the source code, assets, and documentation associated with the project "ConDict".
+"Licensee" refers to any individual or entity exercising permissions granted by this License.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. GRANT OF LICENSE (PERMITTED ACTIONS)
+Subject to the terms and conditions of this License, the Licensor hereby grants the Licensee a non-exclusive, royalty-free right to:
+   a. Use the Software for private, personal, and non-commercial purposes.
+   b. Distribute copies of the Software.
+   c. Modify, merge, and compile the Software.
+   d. Incorporate the Software into other projects (subject to Section 4).
+
+3. RESTRICTIONS (PROHIBITED ACTIONS)
+The Licensee explicitly agrees to the following restrictions:
+   a. COMMERCIAL USE: The Licensee may NOT use the Software or its derivatives for commercial purposes (including but not limited to selling, renting, or monetizing the Software) without the specific conditions met in Section 4 or express written permission from the Licensor.
+   b. TRADEMARKS: This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, specifically the name "ConDict," in any derivative work or modified version, except as required for reasonable and customary use in describing the origin of the Software.
+   c. PATENTS: The Licensee may not claim a patent on the Software or any derivative works based primarily upon the Software.
+   d. WARRANTY: The Licensee may not claim any warranty for the Software.
+
+4. CONDITIONAL COMMERCIAL RIGHTS & ATTRIBUTION
+The Licensee is permitted to sell or commercially exploit a project that incorporates this Software ONLY IF all of the following conditions are met:
+   a. ATTRIBUTION: The original author (jqackkk) must be clearly credited in the project's documentation or "About" section.
+   b. THE "70% RULE": The resulting project must be a significant original work. The Licensee may NOT sell the project if the Licensor's original Source Code (modified or unmodified) comprises 70% or more of the total codebase of the Licensee's project. The determination of this percentage shall be based on the total line count of code logic.
+
+5. DISCLAIMER OF WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+6. LIMITATION OF LIABILITY
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
