@@ -12,10 +12,15 @@ struct ConDictApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Word.self,
+            Folder.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
-        return try! ModelContainer(for: schema, configurations: [modelConfiguration])
+        do {
+            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+        } catch {
+            fatalError("Could not create ModelContainer: \(error)")
+        }
     }()
 
     var body: some Scene {
@@ -23,5 +28,16 @@ struct ConDictApp: App {
             ContentView()
         }
         .modelContainer(sharedModelContainer)
+        .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About ConDict") {
+                    NSApp.orderFrontStandardAboutPanel()
+                }
+            }
+        }
+        
+        Settings {
+            SettingsView()
+        }
     }
 }

@@ -8,85 +8,153 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
-import AVFoundation // <--- IMPORT REQUIRED FOR SPEECH
+import AVFoundation
+import PhotosUI
 
-// Global Synthesizer (Must be outside the struct to persist)
 let speechSynthesizer = AVSpeechSynthesizer()
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Word.term) private var words: [Word]
     
-    // UI State
+    @Query(sort: \Word.term) private var words: [Word]
+    @Query(sort: \Folder.name) private var folders: [Folder]
+    
+    // Global Settings
+    @AppStorage("selectedVoiceID") var selectedVoiceID: String = ""
+    @AppStorage("appTheme") var appTheme: String = "System"
+    @AppStorage("selectedFont") var selectedFont: String = "System"
+    
     @State private var selectedWord: Word?
+    @State private var selectedFolder: Folder?
     @State private var searchText = ""
     @State private var selectedFilter: String = "All"
     
-    // Sheet State
     @State private var isShowingAddSheet = false
-    
-    // Export State
+    @State private var isShowingFolderSheet = false
     @State private var isShowingExport = false
     @State private var document: JSONDocument?
     
+    @State private var newFolderName = ""
+    @State private var newFolderTags = ""
+    
     var partsOfSpeech = ["All", "Noun", "Verb", "Adjective", "Adverb", "Pronoun", "Particle", "Conjunction", "Interjection", "Other"]
-
+    
+    // Font Helper
+    func getCustomFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        if selectedFont == "System" {
+            return .system(size: size, weight: weight, design: .serif)
+        } else {
+            return .custom(selectedFont, size: size).weight(weight)
+        }
+    }
+    
+    var colorScheme: ColorScheme? {
+        switch appTheme {
+        case "Light": return .light
+        case "Dark": return .dark
+        default: return nil
+        }
+    }
+    
     var filteredWords: [Word] {
-        words.filter { word in
-            let matchesSearch = searchText.isEmpty ||
+        let folderFiltered = selectedFolder == nil ? words : words.filter { $0.folder == selectedFolder }
+        
+        // 1. Filter by Search Text
+        let searchFiltered: [Word]
+        if searchText.isEmpty {
+            searchFiltered = folderFiltered
+        } else {
+            searchFiltered = folderFiltered.filter { word in
                 word.term.localizedCaseInsensitiveContains(searchText) ||
-                word.definition.localizedCaseInsensitiveContains(searchText)
-            
-            let matchesFilter = selectedFilter == "All" || word.partOfSpeech == selectedFilter
-            
-            return matchesSearch && matchesFilter
+                word.definition.localizedCaseInsensitiveContains(searchText) ||
+                word.locationTags.contains { $0.localizedCaseInsensitiveContains(searchText) }
+            }
+        }
+        
+        // 2. Filter by Part of Speech
+        if selectedFilter == "All" {
+            return searchFiltered
+        } else {
+            return searchFiltered.filter { $0.partOfSpeech == selectedFilter }
         }
     }
 
     var body: some View {
         NavigationSplitView {
-            // --- SIDEBAR ---
             List(selection: $selectedWord) {
-                // Invisible Top Spacer
-                Color.clear
-                    .frame(height: 10)
-                    .listRowInsets(EdgeInsets())
-                    .selectionDisabled()
-                    .accessibilityHidden(true)
-                
-                ForEach(filteredWords) { word in
-                    NavigationLink(value: word) {
-                        VStack(alignment: .leading) {
-                            Text(word.term)
-                                .font(.headline)
-                            Text(word.definition)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        .padding(.vertical, 3)
+                Section("Library") {
+                    Button(action: { selectedFolder = nil }) {
+                        Label("All Words", systemImage: "tray.full")
+                            .padding(.vertical, 4)
                     }
-                    .contextMenu {
-                        Button("Delete", role: .destructive) {
-                            deleteWord(word)
+                    .buttonStyle(.plain)
+                    .tag(nil as Folder?)
+                }
+                
+                Section("Folders") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 10) {
+                        ForEach(folders) { folder in
+                            Button(action: { selectedFolder = folder }) {
+                                VStack {
+                                    Image(systemName: folder.icon)
+                                        .font(.title2)
+                                        .foregroundStyle(selectedFolder == folder ? .white : Color.accentColor)
+                                    Text(folder.name)
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                        .foregroundStyle(selectedFolder == folder ? .white : .primary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(10)
+                                .background(selectedFolder == folder ? Color.accentColor : Color.gray.opacity(0.1))
+                                .cornerRadius(8)
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu { Button("Delete", role: .destructive) { deleteFolder(folder) } }
                         }
+                        
+                        Button(action: {
+                            newFolderName = ""; newFolderTags = ""; isShowingFolderSheet = true
+                        }) {
+                            VStack {
+                                Image(systemName: "plus").font(.title2).foregroundStyle(.secondary)
+                                Text("New").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(10)
+                            .background(Color.clear)
+                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5])).foregroundStyle(.secondary.opacity(0.5)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 5)
+                }
+                
+                Section(selectedFolder?.name ?? "All Words") {
+                    ForEach(filteredWords) { word in
+                        NavigationLink(value: word) {
+                            VStack(alignment: .leading) {
+                                Text(word.term).font(getCustomFont(size: 16, weight: .bold))
+                                Text(word.definition).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            .padding(.vertical, 3)
+                        }
+                        .contextMenu { Button("Delete", role: .destructive) { deleteWord(word) } }
                     }
                 }
             }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 250)
+            .navigationSplitViewColumnWidth(min: 220, ideal: 250)
             .searchable(text: $searchText, placement: .sidebar)
             
         } detail: {
-            // --- DETAIL VIEW ---
             if let word = selectedWord {
-                WordDetailContainer(word: word)
+                WordDetailContainer(word: word, selectedVoiceID: selectedVoiceID, selectedFont: selectedFont)
             } else {
                 ContentUnavailableView("Select a Word", systemImage: "book", description: Text("Select a word from the sidebar or add a new one."))
             }
         }
-        // --- TOOLBAR ---
+        .preferredColorScheme(colorScheme)
         .toolbar {
-            // 1. FILTER BUTTON
             ToolbarItem(placement: .automatic) {
                 Menu {
                     Picker("Filter", selection: $selectedFilter) {
@@ -95,61 +163,69 @@ struct ContentView: View {
                         }
                     }
                 } label: {
-                    Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                    Label("Filter", systemImage: selectedFilter == "All" ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                 }
             }
-
-            // 2. ADD BUTTON
             ToolbarItem(placement: .primaryAction) {
-                Button(action: { isShowingAddSheet = true }) {
-                    Label("Add Word", systemImage: "plus")
-                }
+                Button(action: { newFolderName = ""; newFolderTags = ""; isShowingFolderSheet = true }) { Label("New Folder", systemImage: "folder.badge.plus") }
             }
-            
-            // 3. EXPORT BUTTON
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { isShowingAddSheet = true }) { Label("Add Word", systemImage: "plus") }
+            }
             ToolbarItem(placement: .automatic) {
-                Button(action: prepareExport) {
-                    Label("Export JSON", systemImage: "square.and.arrow.up")
-                }
+                Button(action: prepareExport) { Label("Export JSON", systemImage: "square.and.arrow.up") }
             }
         }
-        // --- POP-OVER FOR NEW WORDS ---
         .sheet(isPresented: $isShowingAddSheet) {
-            AddWordView()
+            AddWordView(targetFolder: selectedFolder).preferredColorScheme(colorScheme)
         }
-        // --- EXPORT LOGIC ---
-        .fileExporter(
-            isPresented: $isShowingExport,
-            document: document,
-            contentType: .json,
-            defaultFilename: "MyConDict_Backup"
-        ) { result in
-            if case .success(let url) = result {
-                print("Saved to \(url)")
-            } else {
-                print("Export failed")
+        .sheet(isPresented: $isShowingFolderSheet) {
+            NavigationStack {
+                Form {
+                    TextField("Folder Name", text: $newFolderName)
+                    TextField("Tags (comma separated)", text: $newFolderTags)
+                }
+                .navigationTitle("New Folder")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { isShowingFolderSheet = false } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Create") {
+                            let tags = newFolderTags.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+                            let newFolder = Folder(name: newFolderName, tags: tags)
+                            modelContext.insert(newFolder)
+                            isShowingFolderSheet = false
+                        }
+                        .disabled(newFolderName.isEmpty)
+                    }
+                }
+                .frame(width: 400, height: 200)
             }
+        }
+        .fileExporter(isPresented: $isShowingExport, document: document, contentType: .json, defaultFilename: "ConDict_Export") { result in
+            if case .success(let url) = result { print("Saved to \(url)") }
         }
     }
 
     private func deleteWord(_ word: Word) {
         withAnimation {
-            if selectedWord == word {
-                selectedWord = nil
-            }
+            if selectedWord == word { selectedWord = nil }
             modelContext.delete(word)
+        }
+    }
+    
+    private func deleteFolder(_ folder: Folder) {
+        withAnimation {
+            if selectedFolder == folder { selectedFolder = nil }
+            modelContext.delete(folder)
         }
     }
     
     private func prepareExport() {
         let exportData = words.map {
             WordExport(
-                term: $0.term,
-                pronunciation: $0.pronunciation,
-                definition: $0.definition,
-                partOfSpeech: $0.partOfSpeech,
-                example: $0.example,
-                notes: $0.notes
+                term: $0.term, pronunciation: $0.pronunciation, definition: $0.definition, partOfSpeech: $0.partOfSpeech,
+                example: $0.example, notes: $0.notes, translations: $0.translations, variations: $0.variations,
+                tags: $0.tags, locationTags: $0.locationTags, imageData: $0.imageData, folderName: $0.folder?.name
             )
         }
         if let data = try? JSONEncoder().encode(exportData) {
@@ -159,9 +235,11 @@ struct ContentView: View {
     }
 }
 
-// MARK: - 1. Detail Container (Handles Read vs Edit Mode)
+// MARK: - Detail Container
 struct WordDetailContainer: View {
     @Bindable var word: Word
+    var selectedVoiceID: String
+    var selectedFont: String
     @State private var isEditing = false
     
     var body: some View {
@@ -169,235 +247,371 @@ struct WordDetailContainer: View {
             if isEditing {
                 WordEditForm(word: word)
             } else {
-                WordDisplayView(word: word)
+                WordDisplayView(word: word, voiceID: selectedVoiceID, selectedFont: selectedFont)
             }
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Button(isEditing ? "Done" : "Edit") {
-                    withAnimation {
-                        isEditing.toggle()
-                    }
-                }
+                Button(isEditing ? "Done" : "Edit") { withAnimation { isEditing.toggle() } }
             }
         }
     }
 }
 
-// MARK: - 2. The "Clean" Read-Only Interface
+// MARK: - Display View
 struct WordDisplayView: View {
-    let word: Word
+    let word: Word // Use 'let' here, changes come from parent
+    let voiceID: String
+    let selectedFont: String
+    
+    @State private var activePopover: UUID?
+    
+    func getCustomFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        if selectedFont == "System" {
+            return .system(size: size, weight: weight, design: .serif)
+        } else {
+            return .custom(selectedFont, size: size).weight(weight)
+        }
+    }
     
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                
-                // HEADER: Term, IPA, and Type
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(word.term)
-                        .font(.system(size: 48, weight: .bold, design: .serif))
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 20) {
                     
-                    HStack(spacing: 12) {
-                        if !word.pronunciation.isEmpty {
-                            // 👇 IPA SECTION WITH SPEAKER BUTTON
-                            HStack(spacing: 6) {
-                                Text("/\(word.pronunciation)/")
-                                    .font(.system(.title3, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
-                                
-                                Button(action: { speakIPA(word.pronunciation) }) {
-                                    Image(systemName: "speaker.wave.2.circle.fill")
-                                        .foregroundStyle(.tint)
-                                        .font(.title3)
+                    // Header
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(word.term).font(getCustomFont(size: 48, weight: .bold)).textSelection(.enabled)
+                        
+                        HStack(spacing: 12) {
+                            if !word.pronunciation.isEmpty {
+                                HStack(spacing: 4) {
+                                    Text("/\(word.pronunciation)/").font(.system(.title3, design: .monospaced)).foregroundStyle(.secondary)
+                                    Button(action: { speak(word.pronunciation, isIPA: true) }) {
+                                        Image(systemName: "speaker.wave.2.circle.fill").foregroundStyle(.tint)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
-                                .help("Pronounce IPA")
                             }
+                            Text(word.partOfSpeech).font(.subheadline).fontWeight(.medium).padding(.horizontal, 10).padding(.vertical, 4).background(Color.accentColor.opacity(0.1)).foregroundStyle(Color.accentColor).clipShape(Capsule())
                         }
                         
-                        Text(word.partOfSpeech)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color.accentColor.opacity(0.1))
-                            .foregroundStyle(Color.accentColor)
-                            .clipShape(Capsule())
+                        if !word.tags.isEmpty || !word.locationTags.isEmpty {
+                            HStack {
+                                ForEach(word.tags, id: \.self) { tag in
+                                    Text("#\(tag)").font(.caption).padding(4).background(Color.gray.opacity(0.1)).cornerRadius(4)
+                                }
+                                ForEach(word.locationTags, id: \.self) { loc in
+                                    Text("📍\(loc)").font(.caption).padding(4).background(Color.red.opacity(0.1)).foregroundStyle(.red).cornerRadius(4)
+                                }
+                            }
+                        }
                     }
-                }
-                .padding(.bottom, 10)
-                
-                Divider()
-                
-                // DEFINITION
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Definition", systemImage: "book.closed")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                    Text(word.definition)
-                        .font(.title3)
-                        .lineSpacing(4)
-                        .textSelection(.enabled)
-                }
-                
-                // EXAMPLE
-                if !word.example.isEmpty {
+                    Divider()
+                    
+                    // Definition
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("Example", systemImage: "quote.opening")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                        
-                        Text(word.example)
-                            .font(.system(.body, design: .serif))
-                            .italic()
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.gray.opacity(0.05))
-                            .cornerRadius(8)
-                            .textSelection(.enabled)
+                        Label("Definition", systemImage: "book.closed").font(.headline).foregroundStyle(.secondary)
+                        Text(.init(word.definition)).font(getCustomFont(size: 22)).lineSpacing(4).textSelection(.enabled)
+                    }
+                    
+                    // Example
+                    if !word.example.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Example", systemImage: "quote.opening").font(.headline).foregroundStyle(.secondary)
+                            Text(word.example).font(getCustomFont(size: 18)).italic().padding().frame(maxWidth: .infinity, alignment: .leading).background(Color.gray.opacity(0.05)).cornerRadius(8)
+                        }
+                    }
+                    
+                    // VARIATIONS (Fixed Popover Style)
+                    if !word.variations.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Variations", systemImage: "map.fill").font(.headline).foregroundStyle(.secondary)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 10) {
+                                ForEach(word.variations) { variant in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text(variant.name).font(.headline)
+                                            Spacer()
+                                            
+                                            Button(action: { activePopover = variant.id }) {
+                                                Image(systemName: "mappin.circle.fill")
+                                                    .foregroundStyle(Color.accentColor)
+                                                    .font(.title3)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .popover(isPresented: Binding(
+                                                get: { activePopover == variant.id },
+                                                set: { if !$0 { activePopover = nil } }
+                                            ), arrowEdge: .bottom) {
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text("Location")
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                    Text(variant.location)
+                                                        .font(.headline)
+                                                }
+                                                .padding()
+                                                .frame(minWidth: 150)
+                                            }
+                                        }
+                                        HStack {
+                                            Text("/\(variant.pronunciation)/").font(.caption).foregroundStyle(.secondary)
+                                            Spacer()
+                                            Button(action: { speak(variant.pronunciation, isIPA: true) }) {
+                                                Image(systemName: "speaker.wave.1").font(.caption)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                    .padding(10)
+                                    .background(Color.gray.opacity(0.1))
+                                    .cornerRadius(8)
+                                }
+                            }
+                        }
+                    }
+                    
+                    // TRANSLATIONS (Display - Ensure this is present)
+                    if !word.translations.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Translations", systemImage: "globe").font(.headline).foregroundStyle(.secondary)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 10) {
+                                ForEach(word.translations) { trans in
+                                    HStack {
+                                        VStack(alignment: .leading) {
+                                            Text(trans.text).font(.headline)
+                                            Text(trans.language).font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Button(action: { speak(trans.text) }) {
+                                            Image(systemName: "speaker.wave.1").font(.caption).foregroundStyle(.blue)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    .padding(10)
+                                    .background(Color.gray.opacity(0.1))
+                                    .cornerRadius(8)
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Notes
+                    if !word.notes.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Notes", systemImage: "note.text").font(.headline).foregroundStyle(.secondary)
+                            Text(word.notes).font(.body)
+                        }
                     }
                 }
                 
-                // NOTES
-                if !word.notes.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Notes", systemImage: "note.text")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                        Text(word.notes)
-                            .font(.body)
-                            .textSelection(.enabled)
-                    }
+                // Image
+                if let imageData = word.imageData, let nsImage = NSImage(data: imageData) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 250, height: 250)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(radius: 4)
                 }
-                
-                Spacer()
             }
             .padding(40)
         }
     }
     
-    // 👇 TTS FUNCTION
-    func speakIPA(_ ipa: String) {
-        let utterance = AVSpeechUtterance(string: ipa)
-        // en-US usually handles IPA characters decently, though support varies by system version
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+    func speak(_ text: String, isIPA: Bool = false) {
+        let utterance = AVSpeechUtterance(string: text)
+        if !isIPA {
+            if let scalar = text.unicodeScalars.first, scalar.value >= 0x0400 && scalar.value <= 0x04FF {
+                utterance.voice = AVSpeechSynthesisVoice(language: "ru-RU")
+            } else if !voiceID.isEmpty {
+                utterance.voice = AVSpeechSynthesisVoice(identifier: voiceID)
+            }
+        } else {
+            utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        }
         speechSynthesizer.speak(utterance)
     }
 }
 
-// MARK: - 3. The "Edit" Form
+// MARK: - Edit Form
 struct WordEditForm: View {
     @Bindable var word: Word
+    @Query private var folders: [Folder]
+    @State private var selectedItem: PhotosPickerItem?
+    
     let partsOfSpeech = ["Noun", "Verb", "Adjective", "Adverb", "Pronoun", "Particle", "Conjunction", "Interjection", "Other"]
 
     var body: some View {
-        Form {
-            Section(header: Text("Basic Info")) {
-                TextField("Term", text: $word.term)
-                    .font(.title2)
-                    .bold()
-                
-                TextField("Pronunciation (IPA)", text: $word.pronunciation)
-                    .font(.system(.body, design: .monospaced))
-                
-                Picker("Part of Speech", selection: $word.partOfSpeech) {
-                    ForEach(partsOfSpeech, id: \.self) { type in
-                        Text(type).tag(type)
+        ScrollView {
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Header
+                    VStack(alignment: .leading, spacing: 12) {
+                        TextField("Term", text: $word.term).font(.system(size: 48, weight: .bold, design: .serif)).textFieldStyle(.plain)
+                        HStack {
+                            TextField("IPA", text: $word.pronunciation).font(.system(.title3, design: .monospaced)).textFieldStyle(.plain)
+                            Picker("", selection: $word.partOfSpeech) {
+                                ForEach(partsOfSpeech, id: \.self) { type in Text(type).tag(type) }
+                            }.labelsHidden().frame(width: 120)
+                        }
+                        Picker("Folder", selection: $word.folder) {
+                            Text("None").tag(nil as Folder?)
+                            ForEach(folders) { folder in Text(folder.name).tag(folder as Folder?) }
+                        }.pickerStyle(.menu).frame(maxWidth: 200)
+                        
+                        TextField("Location Tags (comma separated)", text: Binding(
+                            get: { word.locationTags.joined(separator: ", ") },
+                            set: { word.locationTags = $0.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) } }
+                        ))
+                    }
+                    Divider()
+                    
+                    // Definition
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Label("Definition", systemImage: "book.closed").font(.headline).foregroundStyle(.secondary)
+                            Spacer()
+                            HStack(spacing: 2) {
+                                Button(action: { word.definition += "**bold**" }) { Image(systemName: "bold") }
+                                Button(action: { word.definition += "*italic*" }) { Image(systemName: "italic") }
+                                Button(action: { word.definition += "~strike~" }) { Image(systemName: "strikethrough") }
+                            }.buttonStyle(.borderless).controlSize(.small)
+                        }
+                        TextField("Definition (Markdown)", text: $word.definition, axis: .vertical).font(.title3).lineSpacing(4).textFieldStyle(.plain).padding(10).background(Color.gray.opacity(0.1)).cornerRadius(8)
+                    }
+                    
+                    // VARIATIONS (Edit)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("Variations", systemImage: "map.fill").font(.headline).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Add") { word.variations.append(Variation()) }
+                        }
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180))], spacing: 10) {
+                            ForEach($word.variations) { $varItem in
+                                VStack(spacing: 6) {
+                                    TextField("Name (e.g. Dialect)", text: $varItem.name).font(.headline)
+                                    TextField("IPA", text: $varItem.pronunciation).font(.caption).foregroundStyle(.secondary)
+                                    TextField("Location", text: $varItem.location).font(.caption).foregroundStyle(.blue)
+                                    Button(role: .destructive) {
+                                        if let idx = word.variations.firstIndex(where: { $0.id == varItem.id }) { word.variations.remove(at: idx) }
+                                    } label: { Image(systemName: "trash").font(.caption) }.buttonStyle(.plain)
+                                }
+                                .padding(10).background(Color.gray.opacity(0.1)).cornerRadius(8)
+                            }
+                        }
+                    }
+                    
+                    // TRANSLATIONS (Edit)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("Translations", systemImage: "globe").font(.headline).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Add") { word.translations.append(Translation()) }
+                        }
+                        ForEach($word.translations) { $trans in
+                            HStack {
+                                TextField("Lang", text: $trans.language).frame(width: 80)
+                                Divider()
+                                TextField("Text", text: $trans.text)
+                                Button(role: .destructive) {
+                                    if let idx = word.translations.firstIndex(where: { $0.id == trans.id }) { word.translations.remove(at: idx) }
+                                } label: { Image(systemName: "trash") }.buttonStyle(.plain)
+                            }
+                        }
                     }
                 }
-            }
-            Section(header: Text("Meaning")) {
-                TextField("Definition", text: $word.definition, axis: .vertical)
-                    .lineLimit(2...4)
                 
-                TextField("Example Sentence", text: $word.example, axis: .vertical)
-                    .font(.system(.body, design: .serif))
-                    .italic()
-                    .lineLimit(2...4)
-            }
-            Section(header: Text("Notes")) {
-                TextField("Etymology / Usage Notes", text: $word.notes, axis: .vertical)
-                    .lineLimit(4...8)
-            }
+                // Image Picker
+                VStack {
+                    if let imageData = word.imageData, let nsImage = NSImage(data: imageData) {
+                        Image(nsImage: nsImage).resizable().aspectRatio(contentMode: .fill).frame(width: 200, height: 200).clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay(Button(action: { word.imageData = nil }) { Image(systemName: "xmark.circle.fill").foregroundStyle(.red) }.buttonStyle(.plain).padding(4), alignment: .topTrailing)
+                    } else {
+                        Rectangle().fill(Color.gray.opacity(0.1)).frame(width: 200, height: 200).cornerRadius(8).overlay(Label("Add Image", systemImage: "photo").foregroundStyle(.secondary))
+                    }
+                    PhotosPicker(selection: $selectedItem, matching: .images) { Text(word.imageData == nil ? "Select Image" : "Change Image") }
+                        .onChange(of: selectedItem) { _, newItem in Task { if let data = try? await newItem?.loadTransferable(type: Data.self) { word.imageData = data } } }
+                }.frame(width: 220)
+            }.padding(40)
         }
-        .padding()
     }
 }
 
-// MARK: - 4. The Pop-over "Add" Sheet
+// MARK: - Add Word Sheet
 struct AddWordView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    var targetFolder: Folder?
     
-    // Local state for the new word
-    @State private var term = ""
-    @State private var pronunciation = ""
-    @State private var definition = ""
-    @State private var partOfSpeech = "Noun"
-    @State private var example = ""
-    @State private var notes = ""
+    @State private var term = ""; @State private var pronunciation = ""; @State private var definition = ""
+    @State private var partOfSpeech = "Noun"; @State private var example = ""; @State private var notes = ""
+    @State private var locationTags = ""
+    @State private var translations: [Translation] = []
+    @State private var variations: [Variation] = []
+    @State private var selectedItem: PhotosPickerItem?; @State private var imageData: Data?
     
     let partsOfSpeech = ["Noun", "Verb", "Adjective", "Adverb", "Pronoun", "Particle", "Conjunction", "Interjection", "Other"]
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("Term", text: $term)
-                    TextField("Pronunciation", text: $pronunciation)
-                    Picker("Part of Speech", selection: $partOfSpeech) {
-                        ForEach(partsOfSpeech, id: \.self) { type in
-                            Text(type).tag(type)
-                        }
+            HStack(alignment: .top) {
+                Form {
+                    Section("Basic Info") {
+                        TextField("Term", text: $term)
+                        TextField("Pronunciation", text: $pronunciation)
+                        Picker("Type", selection: $partOfSpeech) { ForEach(partsOfSpeech, id: \.self) { type in Text(type).tag(type) } }
+                        TextField("Location Tags (comma sep)", text: $locationTags)
                     }
-                }
-                Section {
-                    TextField("Definition", text: $definition, axis: .vertical)
-                        .lineLimit(3...6)
-                    
-                    TextField("Example", text: $example, axis: .vertical)
-                        .font(.system(.body, design: .serif))
-                        .italic()
-                }
-                Section {
-                    TextField("Notes", text: $notes, axis: .vertical)
-                }
+                    Section {
+                        HStack {
+                            Button("B") { definition += "**" }.fontWeight(.bold)
+                            Button("I") { definition += "*" }.italic()
+                            Button("S") { definition += "~" }.strikethrough()
+                            Spacer()
+                        }.buttonStyle(.borderless)
+                        TextField("Definition", text: $definition, axis: .vertical).lineLimit(3...6)
+                        TextField("Example", text: $example, axis: .vertical).font(.system(.body, design: .serif)).italic()
+                    }
+                    Section("Variations") {
+                        ForEach($variations) { $v in
+                            HStack { TextField("Name", text: $v.name); TextField("Loc", text: $v.location) }
+                        }
+                        Button("Add Variation") { variations.append(Variation()) }
+                    }
+                    Section("Translations") {
+                        ForEach($translations) { $t in HStack { TextField("Lang", text: $t.language).frame(width: 60); TextField("Text", text: $t.text) } }
+                        Button("Add Translation") { translations.append(Translation()) }
+                    }
+                }.formStyle(.grouped)
+                VStack {
+                    if let data = imageData, let nsImage = NSImage(data: data) {
+                        Image(nsImage: nsImage).resizable().aspectRatio(contentMode: .fill).frame(width: 150, height: 150).clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.1)).frame(width: 150, height: 150).overlay(Image(systemName: "photo"))
+                    }
+                    PhotosPicker(selection: $selectedItem, matching: .images) { Label("Select Image", systemImage: "photo") }
+                        .onChange(of: selectedItem) { _, newItem in Task { if let data = try? await newItem?.loadTransferable(type: Data.self) { imageData = data } } }
+                }.padding().background(Color.gray.opacity(0.05))
             }
-            .formStyle(.grouped)
             .navigationTitle("New Word")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add Word") {
-                        saveWord()
-                    }
-                    .disabled(term.isEmpty)
-                }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Add Word") { saveWord() }.disabled(term.isEmpty) }
             }
-        }
-        .frame(width: 500, height: 600)
+        }.frame(width: 750, height: 600)
     }
     
     private func saveWord() {
-        let newWord = Word(
-            term: term,
-            pronunciation: pronunciation,
-            definition: definition,
-            partOfSpeech: partOfSpeech,
-            example: example,
-            notes: notes
-        )
+        let locs = locationTags.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        let newWord = Word(term: term, pronunciation: pronunciation, definition: definition, partOfSpeech: partOfSpeech, example: example, notes: notes, translations: translations, variations: variations, tags: targetFolder?.tags ?? [], locationTags: locs, imageData: imageData, folder: targetFolder)
         modelContext.insert(newWord)
         dismiss()
     }
 }
 
-// MARK: - Helper: JSON Document Handling
 struct JSONDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.json] }
     var data: Data
@@ -409,7 +623,5 @@ struct JSONDocument: FileDocument {
 #Preview {
     let config = ModelConfiguration(isStoredInMemoryOnly: true)
     let container = try! ModelContainer(for: Word.self, configurations: config)
-    let sample1 = Word(term: "Qapla'", pronunciation: "qχɑplɑʔ", definition: "Success", partOfSpeech: "Noun")
-    container.mainContext.insert(sample1)
     return ContentView().modelContainer(container)
 }
