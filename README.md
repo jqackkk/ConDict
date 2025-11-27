@@ -13,8 +13,6 @@ The Premier Dictionary Manager for Conlangers
 
 <h1>📚 Documentation</h1>
 Comprehensive documentation for ConDict is coming soon. Watch this space for updates!
-> [!NOTE]
-> You can suggest tips for documentation in the ISSUES tab!
 
 <h1>📥 Installation Guide</h1>
 
