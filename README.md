@@ -26,6 +26,8 @@ Getting ConDict up and running is simple:
 
 4. Launch ConDict from your Launchpad or Applications folder.
 
+Here's a link for downloading, for those of you who do not know how to use github to download files: https://mega.nz/file/iZFhzToC#8hLZkdaJo2MXx_KhPsisfVvpoSbGre0_bD5nw8MTRvw
+
 <h1>⏳ Development & Updates</h1>
 
 ConDict is built and maintained by a 15-year-old student developer.
