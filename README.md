@@ -26,7 +26,7 @@ Getting ConDict up and running is simple:
 
 4. Launch ConDict from your Launchpad or Applications folder.
 
-Here's a link for downloading, for those of you who do not know how to use github to download files: https://mega.nz/file/iZFhzToC#8hLZkdaJo2MXx_KhPsisfVvpoSbGre0_bD5nw8MTRvw
+Here's a link for you to download the .dmg file for those of you who do not know how to use github to download files: https://drive.google.com/file/d/1ipiZ3_SasClyljlzTTZ1KBPxKdeZkc7g/view?usp=sharing
 
 <h1>⏳ Development & Updates</h1>
 
