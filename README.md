@@ -1,6 +1,6 @@
 <div align="center">
 
-<img width="256" height="256" alt="icon-256x256" src="https://github.com/user-attachments/assets/99989122-dfed-4e25-9d5a-69f6be6f316d" />
+<img width="512" height="512" alt="128 × 128@2x" src="https://github.com/user-attachments/assets/2348657c-5837-45af-9fb5-ea7d16c7daa0" />
 
 <h1>ConDict</h1>
 The Premier Dictionary Manager for Conlangers
@@ -18,15 +18,14 @@ Comprehensive documentation for ConDict is coming soon. Watch this space for upd
 
 Getting ConDict up and running is simple:
 
-1. Download the latest .dmg release.
+1. Download the latest .dmg release from the "Releases" tab.
 
-2. Open the disk image.
+2. Double-click the .dmg file to open the disk image.
 
 3. Drag the ConDict app icon into the provided Applications folder shortcut.
 
 4. Launch ConDict from your Launchpad or Applications folder.
 
-Here's a link for you to download the .dmg file for those of you who do not know how to use github to download files: https://drive.google.com/file/d/1ipiZ3_SasClyljlzTTZ1KBPxKdeZkc7g/view?usp=sharing
 
 <h1>⏳ Development & Updates</h1>
 
@@ -35,7 +34,7 @@ Because I am balancing high school and work, development speed may vary.
 
 <h2>Release Schedule</h2>
 
-Updates are generally released every 1-2 weeks, depending on my academic workload. Thank you for your patience and support!
+Updates are generally released monthly, depending on both my academic workload and the content that will be in the next update. Thank you for your patience and support!
 
 <div align="center">
 <sub>Built with ❤️ for the Conlanging Community</sub>
