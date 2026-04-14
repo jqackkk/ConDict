@@ -12,7 +12,8 @@ The Premier Dictionary Manager for Conlangers
 > This is required because I am an independent student developer and do not pay the annual $99 fee for an Apple Developer Program membership required for app notarization.
 
 <h1>📚 Documentation</h1>
-Comprehensive documentation for ConDict is coming soon. Watch this space for updates!
+Comprehensive documentation for ConDict is coming soon. Watch this video for a quick rundown:
+https://drive.google.com/drive/folders/1LR5R3UxmsPHCqSpEFQNVTT0UzNBBzgpz?usp=share_link
 
 <h1>📥 Installation Guide</h1>
 
