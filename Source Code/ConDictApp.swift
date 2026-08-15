@@ -34,8 +34,14 @@ struct ConDictApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About ConDict") {
-                    NSApp.orderFrontStandardAboutPanel()
+                    NSApp.orderFrontStandardAboutPanel(nil)
                 }
+            }
+            CommandGroup(after: .sidebar) {
+                Button("Show Statistics") {
+                    NotificationCenter.default.post(name: NSNotification.Name("ShowStatistics"), object: nil)
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
             }
         }
         

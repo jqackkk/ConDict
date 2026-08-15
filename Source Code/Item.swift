@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 
 // MARK: - SUB-MODELS
 
-struct Translation: Codable, Identifiable, Hashable {
+struct Translation: Codable, Identifiable, Hashable, Sendable {
     var id = UUID()
     var language: String
     var text: String
@@ -23,7 +23,7 @@ struct Translation: Codable, Identifiable, Hashable {
     }
 }
 
-struct Variation: Codable, Identifiable, Hashable {
+struct Variation: Codable, Identifiable, Hashable, Sendable {
     var id = UUID()
     var name: String
     var pronunciation: String
@@ -39,7 +39,7 @@ struct Variation: Codable, Identifiable, Hashable {
 }
 
 // Moved from Utilities to allow persistence
-struct SCARule: Identifiable, Codable {
+struct SCARule: Identifiable, Codable, Sendable {
     var id = UUID()
     var find: String
     var replace: String
@@ -72,6 +72,7 @@ final class InflectionSchema {
     var name: String
     var rowHeaders: [String]
     var colHeaders: [String]
+    var defaultData: String?
     
     var library: Library?
     
@@ -196,7 +197,7 @@ final class Word {
 // MARK: - SHARED DATA TYPES
 
 // Data Transfer Object for Export/Import
-struct WordExport: Codable {
+struct WordExport: Codable, Sendable {
     let term: String
     let pronunciation: String
     let definition: String
@@ -215,10 +216,38 @@ struct WordExport: Codable {
 }
 
 // Shared Document Type for Exporting
-struct JSONDocument: FileDocument {
+@Observable
+final class JSONDocument: ReadableDocument, WritableDocument {
     static var readableContentTypes: [UTType] { [.json] }
-    var data: Data
-    init(data: Data) { self.data = data }
-    init(configuration: ReadConfiguration) throws { self.data = configuration.file.regularFileContents ?? Data() }
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { return FileWrapper(regularFileWithContents: data) }
+    static var writableContentTypes: [UTType] { [.json] }
+    
+    var words: [WordExport]
+    
+    init(words: [WordExport] = []) {
+        self.words = words
+    }
+    
+    func reader(configuration: sending DocumentReadConfiguration) -> sending FileWrapperDocumentReader<[WordExport]> {
+        FileWrapperDocumentReader(configuration) { fileWrapper in
+            guard let data = fileWrapper.regularFileContents else { return [] }
+            return try JSONDecoder().decode([WordExport].self, from: data)
+        }
+    }
+    
+    @MainActor
+    func apply(snapshot: [WordExport], previous: [WordExport]?) async throws {
+        self.words = snapshot
+    }
+    
+    func writer(configuration: sending DocumentWriteConfiguration) -> sending FileWrapperDocumentWriter<[WordExport]> {
+        FileWrapperDocumentWriter(configuration) { snapshot, _ in
+            let data = try JSONEncoder().encode(snapshot)
+            return FileWrapper(regularFileWithContents: data)
+        }
+    }
+    
+    @MainActor
+    func snapshot(contentType: UTType) async throws -> [WordExport] {
+        return words
+    }
 }

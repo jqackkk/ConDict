@@ -10,29 +10,61 @@ import SwiftData
 import AVFoundation
 import UniformTypeIdentifiers
 
+enum SettingsTab: Hashable {
+    case general
+    case data
+    case developer
+    case about
+    case helpTopic(String, String) // name, icon
+}
+
 struct SettingsView: View {
     @AppStorage("appTheme") private var appTheme: String = "System"
     @AppStorage("selectedVoiceID") private var selectedVoiceID: String = ""
     @AppStorage("selectedFont") private var selectedFont: String = "System"
     
+    @State private var selectedTab: SettingsTab? = .general
+    
     var body: some View {
-        TabView {
-            GeneralSettingsView(appTheme: $appTheme, selectedVoiceID: $selectedVoiceID, selectedFont: $selectedFont)
-                .tabItem { Label("General", systemImage: "gear") }
-            
-            DataSettingsView()
-                .tabItem { Label("Data", systemImage: "externaldrive") }
-            
-            HelpSettingsView()
-                .tabItem { Label("Help", systemImage: "questionmark.circle") }
-            
-            DeveloperSettingsView()
-                .tabItem { Label("Developer", systemImage: "hammer") }
-            
-            AboutSettingsView()
-                .tabItem { Label("About", systemImage: "info.circle") }
+        NavigationSplitView {
+            List(selection: $selectedTab) {
+                Section {
+                    Label("General", systemImage: "gear").tag(SettingsTab.general)
+                    Label("Developer Profile", systemImage: "person.crop.circle").tag(SettingsTab.developer)
+                    Label("Data Management", systemImage: "externaldrive").tag(SettingsTab.data)
+                    Label("About", systemImage: "info.circle").tag(SettingsTab.about)
+                }
+                
+                Section("Help Topics") {
+                    Label("IPA", systemImage: "waveform").tag(SettingsTab.helpTopic("Help_IPA", "waveform"))
+                    Label("Libraries", systemImage: "books.vertical").tag(SettingsTab.helpTopic("Help_Libraries", "books.vertical"))
+                    Label("Locations", systemImage: "map").tag(SettingsTab.helpTopic("Help_Locations", "map"))
+                    Label("Import & Export", systemImage: "square.and.arrow.up").tag(SettingsTab.helpTopic("Help_ImportExport", "square.and.arrow.up"))
+                    Label("Etymology", systemImage: "tree").tag(SettingsTab.helpTopic("Help_Etymology", "tree"))
+                    Label("Folders", systemImage: "folder").tag(SettingsTab.helpTopic("Help_Folders", "folder"))
+                    Label("Typography", systemImage: "textformat.alt").tag(SettingsTab.helpTopic("Help_Typography", "textformat.alt"))
+                }
+            }
+            .listStyle(.sidebar)
+            .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(min: 220, ideal: 250)
+        } detail: {
+            switch selectedTab {
+            case .general:
+                GeneralSettingsView(appTheme: $appTheme, selectedVoiceID: $selectedVoiceID, selectedFont: $selectedFont)
+            case .data:
+                DataSettingsView()
+            case .about:
+                AboutSettingsView()
+            case .developer:
+                DeveloperSettingsView()
+            case .helpTopic(let assetName, let icon):
+                HelpTopicDetailView(assetName: assetName, iconName: icon)
+            case .none:
+                Text("Select an item")
+            }
         }
-        .frame(width: 700, height: 550)
+        .frame(width: 800, height: 600)
     }
 }
 
@@ -43,51 +75,32 @@ struct DataSettingsView: View {
     
     @State private var showExport = false
     @State private var showImport = false
-    @State private var document: JSONDocument?
+    @State private var document = JSONDocument()
     @State private var importMessage = ""
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 25) {
-                Text("Data Management")
-                    .font(.system(size: 32, weight: .bold, design: .serif))
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.bottom, 10)
-                
-                VStack(alignment: .center, spacing: 10) {
-                    Label("Backup & Restore", systemImage: "arrow.triangle.2.circlepath").font(.headline)
+        Form {
+            Section("Backup & Restore") {
+                VStack(alignment: .leading, spacing: 10) {
                     Text("Export your dictionary to JSON or import an existing backup.")
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
                     
                     HStack(spacing: 20) {
-                        Button(action: prepareExport) {
-                            HStack {
-                                Image(systemName: "square.and.arrow.up")
-                                Text("Export JSON")
-                            }.frame(width: 120)
-                        }
-                        
-                        Button(action: { showImport = true }) {
-                            HStack {
-                                Image(systemName: "square.and.arrow.down")
-                                Text("Import JSON")
-                            }.frame(width: 120)
-                        }
+                        Button(action: prepareExport) { Label("Export JSON", systemImage: "square.and.arrow.up") }
+                        Button(action: { showImport = true }) { Label("Import JSON", systemImage: "square.and.arrow.down") }
                     }
-                }
-                .frame(maxWidth: .infinity)
-                .padding().background(Color.gray.opacity(0.1)).cornerRadius(12)
-                
-                if !importMessage.isEmpty {
-                    Text(importMessage)
-                        .foregroundStyle(importMessage.starts(with: "Error") ? .red : .green)
-                        .font(.caption)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 5)
                 }
             }
-            .padding(40)
+            
+            if !importMessage.isEmpty {
+                Section {
+                    Text(importMessage).foregroundStyle(importMessage.starts(with: "Error") ? .red : .green)
+                }
+            }
         }
+        .formStyle(.grouped)
+        .navigationTitle("Data Management")
         .fileExporter(isPresented: $showExport, document: document, contentType: .json, defaultFilename: "ConDict_Backup") { _ in }
         .fileImporter(isPresented: $showImport, allowedContentTypes: [.json]) { result in
             switch result {
@@ -109,10 +122,8 @@ struct DataSettingsView: View {
                 inflectionData: $0.inflectionData
             )
         }
-        if let data = try? JSONEncoder().encode(exportData) {
-            self.document = JSONDocument(data: data)
-            self.showExport = true
-        }
+        self.document = JSONDocument(words: exportData)
+        self.showExport = true
     }
     
     private func importJSON(from url: URL) {
@@ -128,20 +139,11 @@ struct DataSettingsView: View {
             
             for item in importedWords {
                 let newWord = Word(
-                    term: item.term,
-                    pronunciation: item.pronunciation,
-                    definition: item.definition,
-                    partOfSpeech: item.partOfSpeech,
-                    example: item.example,
-                    notes: item.notes,
-                    translations: item.translations,
-                    variations: item.variations,
-                    tags: item.tags,
-                    locationTags: item.locationTags,
-                    isPinned: item.isPinned,
-                    library: lib
+                    term: item.term, pronunciation: item.pronunciation, definition: item.definition,
+                    partOfSpeech: item.partOfSpeech, example: item.example, notes: item.notes,
+                    translations: item.translations, variations: item.variations, tags: item.tags,
+                    locationTags: item.locationTags, isPinned: item.isPinned, library: lib
                 )
-                // Note: inflectionData is imported but parentWord linking would require a second pass
                 if let infData = item.inflectionData { newWord.inflectionData = infData }
                 modelContext.insert(newWord)
             }
@@ -208,185 +210,139 @@ struct GeneralSettingsView: View {
     }
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 25) {
-                
-                Text("General Settings")
-                    .font(.system(size: 32, weight: .bold, design: .serif))
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.bottom, 10)
-                
-                // Libraries Section
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Label("Libraries", systemImage: "books.vertical").font(.headline)
-                        Spacer()
-                        Button(action: { showNewLibSheet = true }) {
-                            Image(systemName: "plus.circle").font(.title2)
-                        }.buttonStyle(.plain)
-                    }
-                    
-                    if libraries.isEmpty {
-                        Text("No libraries found.").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        ForEach(libraries) { lib in
-                            HStack {
-                                Text(lib.name)
-                                Spacer()
-                                Text("\(lib.words?.count ?? 0) words").font(.caption).foregroundStyle(.secondary)
-                                Button(action: { modelContext.delete(lib) }) {
-                                    Image(systemName: "trash").foregroundStyle(.red)
-                                }.buttonStyle(.plain)
-                            }
-                            .padding(8).background(Color.gray.opacity(0.1)).cornerRadius(6)
-                        }
-                    }
-                }
-                .sheet(isPresented: $showNewLibSheet) {
-                    VStack(spacing: 20) {
-                        Text("New Library").font(.headline)
-                        TextField("Name", text: $newLibName).textFieldStyle(.roundedBorder)
+        Form {
+            Section("Libraries") {
+                if libraries.isEmpty {
+                    Text("No libraries found.").foregroundStyle(.secondary)
+                } else {
+                    ForEach(libraries) { lib in
                         HStack {
-                            Button("Cancel") { showNewLibSheet = false }
-                            Button("Create") {
-                                let lib = Library(name: newLibName)
-                                modelContext.insert(lib)
-                                showNewLibSheet = false
-                                newLibName = ""
-                            }.buttonStyle(.borderedProminent).disabled(newLibName.isEmpty)
-                        }
-                    }.padding().frame(width: 300)
-                }
-                
-                Divider()
-                
-                VStack(alignment: .leading) {
-                    Label("Appearance", systemImage: "paintbrush").font(.headline)
-                    Picker("", selection: $appTheme) {
-                        Text("System").tag("System"); Text("Light").tag("Light"); Text("Dark").tag("Dark")
-                    }.pickerStyle(.segmented)
-                }
-                
-                Divider()
-                
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Typography", systemImage: "textformat").font(.headline)
-                    HStack {
-                        Picker("Script", selection: $fontScriptFilter) { ForEach(scripts, id: \.self) { Text($0).tag($0) } }.frame(width: 120)
-                            .onChange(of: fontScriptFilter) { _, val in
-                                if val == "All" { selectedFont = "System" }
-                                else if let f = fontOptions.first { selectedFont = f }
-                            }
-                        Picker("Font", selection: $selectedFont) {
-                            if fontScriptFilter == "All" { Text("System").tag("System") }
-                            else { ForEach(fontOptions, id: \.self) { Text($0).tag($0) } }
+                            Text(lib.name)
+                            Spacer()
+                            Text("\(lib.words?.count ?? 0) words").foregroundStyle(.secondary)
+                            Button(action: { modelContext.delete(lib) }) { Image(systemName: "trash").foregroundStyle(.red) }.buttonStyle(.plain)
                         }
                     }
                 }
-                
-                Divider()
-                
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Pronunciation Voice", systemImage: "waveform").font(.headline)
-                    HStack {
-                        Picker("Language", selection: $selectedLanguageFilter) {
-                            ForEach(availableLanguages, id: \.self) { code in Text(Locale.current.localizedString(forLanguageCode: code) ?? code).tag(code) }
-                        }.frame(width: 150)
-                        Picker("Voice", selection: $selectedVoiceID) {
-                            Text("System Default").tag(""); Divider()
-                            ForEach(filteredVoices, id: \.identifier) { voice in Text("\(voice.name) (\(voice.language))").tag(voice.identifier) }
-                        }
-                    }
+                Button("New Library...") { showNewLibSheet = true }
+            }
+            
+            Section("Appearance") {
+                Picker("Theme", selection: $appTheme) {
+                    Text("System").tag("System"); Text("Light").tag("Light"); Text("Dark").tag("Dark")
                 }
             }
-            .padding(40)
+            
+            Section("Typography") {
+                Picker("Script", selection: $fontScriptFilter) { ForEach(scripts, id: \.self) { Text($0).tag($0) } }
+                    .onChange(of: fontScriptFilter) { _, val in
+                        if val == "All" { selectedFont = "System" }
+                        else if let f = fontOptions.first { selectedFont = f }
+                    }
+                Picker("Font", selection: $selectedFont) {
+                    if fontScriptFilter == "All" { Text("System").tag("System") }
+                    else { ForEach(fontOptions, id: \.self) { Text($0).tag($0) } }
+                }
+            }
+            
+            Section("Pronunciation Voice") {
+                Picker("Language", selection: $selectedLanguageFilter) {
+                    ForEach(availableLanguages, id: \.self) { code in Text(Locale.current.localizedString(forLanguageCode: code) ?? code).tag(code) }
+                }
+                Picker("Voice", selection: $selectedVoiceID) {
+                    Text("System Default").tag(""); Divider()
+                    ForEach(filteredVoices, id: \.identifier) { voice in Text("\(voice.name) (\(voice.language))").tag(voice.identifier) }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("General")
+        .sheet(isPresented: $showNewLibSheet) {
+            VStack(spacing: 20) {
+                Text("New Library").font(.headline)
+                TextField("Name", text: $newLibName).textFieldStyle(.roundedBorder)
+                HStack {
+                    Button("Cancel") { showNewLibSheet = false }
+                    Button("Create") {
+                        let lib = Library(name: newLibName)
+                        modelContext.insert(lib)
+                        showNewLibSheet = false
+                        newLibName = ""
+                    }.buttonStyle(.borderedProminent).disabled(newLibName.isEmpty)
+                }
+            }.padding().frame(width: 300)
         }
     }
 }
 
 // MARK: - HELP TAB
-struct HelpSettingsView: View {
-    let helpItems = [
-        HelpItem(title: "IPA", icon: "waveform", description: "The International Phonetic Alphabet (IPA) is a system of symbols used to represent all sounds in human speech."),
-        HelpItem(title: "Libraries", icon: "books.vertical", description: "The Libraries feature allows you to manage separate dictionaries for different languages within the same app."),
-        HelpItem(title: "Locations", icon: "map", description: "The Locations feature allows you to tag words with specific regional or dialectal origins."),
-        HelpItem(title: "Import & Export", icon: "square.and.arrow.up", description: "The Importing/Exporting feature lets you backup your data to a JSON file or restore from one."),
-        HelpItem(title: "Etymology", icon: "tree", description: "The Etymology Tree feature visualizes a word's history, showing its roots and any terms derived from it."),
-        HelpItem(title: "Folders", icon: "folder", description: "The Folders feature lets you organize words into custom sub-collections within a library for better categorization."),
-        HelpItem(title: "Typography", icon: "textformat.alt", description: "The Typography feature lets you customize the app's font, including support for various scripts like Cyrillic or Arabic.")
-    ]
-    @State private var selectedHelp: HelpItem?
+struct HelpTopicDetailView: View {
+    let assetName: String
+    let iconName: String
+    
+    var markdownContent: String {
+        if let asset = NSDataAsset(name: assetName),
+           let string = String(data: asset.data, encoding: .utf8) {
+            return string
+        }
+        return "Failed to load help topic."
+    }
     
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 25) {
-                Text("Help Center")
-                    .font(.system(size: 32, weight: .bold, design: .serif))
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.bottom, 10)
-                
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 140))], spacing: 20) {
-                    ForEach(helpItems) { item in
-                        Button(action: { selectedHelp = item }) {
-                            VStack(spacing: 10) {
-                                Image(systemName: item.icon).font(.largeTitle).foregroundStyle(Color.accentColor)
-                                Text(item.title).font(.headline)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 120)
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(12)
-                        }
-                        .buttonStyle(.plain)
-                    }
+            VStack(alignment: .leading, spacing: 20) {
+                Image(systemName: iconName).font(.system(size: 50)).foregroundStyle(Color.accentColor).padding(.bottom, 10)
+                if let attrStr = try? AttributedString(markdown: markdownContent) {
+                    Text(attrStr)
+                } else {
+                    Text(markdownContent)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(40)
         }
-        .sheet(item: $selectedHelp) { item in
-            VStack(spacing: 20) {
-                Image(systemName: item.icon).font(.system(size: 50)).foregroundStyle(Color.accentColor)
-                Text(item.title).font(.title).bold()
-                Text(item.description).multilineTextAlignment(.center).padding()
-                Button("Close") { selectedHelp = nil }
-            }
-            .padding().frame(width: 300, height: 300)
-        }
-    }
-    
-    struct HelpItem: Identifiable {
-        let id = UUID(); let title: String; let icon: String; let description: String
+        .navigationTitle("Help Topic")
     }
 }
 
 // MARK: - DEVELOPER TAB
 struct DeveloperSettingsView: View {
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                VStack(spacing: 10) {
-                    Image(systemName: "person.crop.circle").font(.system(size: 80)).foregroundStyle(.gray.opacity(0.3))
+        Form {
+            Section {
+                VStack(spacing: 15) {
+                    Image("ProfilePic").resizable().scaledToFill().frame(width: 100, height: 100).clipShape(Circle())
                     Text("Jack Davenport").font(.title).bold()
                     Text("Student Developer, Conlanger, & Micronation Owner").foregroundStyle(.secondary)
                 }
-                Divider()
-                VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Label("Projects", systemImage: "folder").font(.headline)
-                        Text("• ConDict (macOS Dictionary Manager)").foregroundStyle(.secondary)
-                        Text("• The United Provinces of Sangaia").foregroundStyle(.secondary)
-                        Text("• Sangaian (Conlang)").foregroundStyle(.secondary)
-                    }
-                    VStack(alignment: .leading, spacing: 5) {
-                        Label("Experience", systemImage: "graduationcap").font(.headline)
-                        Text("• SwiftUI & SwiftData Development").foregroundStyle(.secondary)
-                        Text("• macOS App Architecture").foregroundStyle(.secondary)
-                        Text("• High School Student").foregroundStyle(.secondary)
-                        Text("• HTML & CSS Coding").foregroundStyle(.secondary)
-                        Text("• Linux System Development").foregroundStyle(.secondary)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }.padding(40)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+            }
+            
+            Section("Projects") {
+                Label("ConDict (macOS Dictionary Manager)", systemImage: "book.pages")
+                Label("The United Provinces of Sangaia", systemImage: "map")
+                Label("Sangaian (Conlang)", systemImage: "quote.bubble")
+                HStack {
+                    Label("ravynOS", systemImage: "desktopcomputer")
+                    Spacer()
+                    Link(destination: URL(string: "https://ravynos.com")!) {
+                        Image(systemName: "safari")
+                    }.buttonStyle(.plain).foregroundStyle(.blue)
+                }
+            }
+            
+            Section("Experience") {
+                Label("SwiftUI & SwiftData Development", systemImage: "swift")
+                Label("macOS App Architecture", systemImage: "macwindow")
+                Label("College Student", systemImage: "graduationcap")
+                Label("HTML & CSS Coding", systemImage: "chevron.left.forwardslash.chevron.right")
+                Label("C#, C++, and Objective-C", systemImage: "curlybraces")
+                Label("Linux System Development", systemImage: "terminal")
+            }
         }
+        .formStyle(.grouped)
+        .navigationTitle("Developer Profile")
     }
 }
 
@@ -394,22 +350,31 @@ struct DeveloperSettingsView: View {
 struct AboutSettingsView: View {
     @State private var showHistory = false
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                Image("AppIconSettings").resizable().scaledToFit().frame(width: 100, height: 100).clipShape(RoundedRectangle(cornerRadius: 22)).shadow(radius: 5).padding(.top, 20)
-                Text("ConDict").font(.largeTitle).bold().fontDesign(.serif)
-                Text("Beta 1.1").foregroundStyle(.secondary)
-                Divider()
-                VStack(alignment: .center, spacing: 15) {
-                    Text("What's New in Beta 1.1").font(.headline)
-                    VStack(alignment: .leading, spacing: 15) {
-                        FeatureRow(icon: "wand.and.stars", text: "Bug Fixes", subtext: "Squashed some hidden bugs and critters.")
-                    }
-                    }.padding(.horizontal, 20)
-                Spacer()
-                Button("View Version History") { showHistory = true }.buttonStyle(.bordered).padding()
-            }.padding()
+        Form {
+            Section {
+                VStack(spacing: 15) {
+                    Image("AppIconImage").resizable().scaledToFit().frame(width: 80, height: 80).clipShape(RoundedRectangle(cornerRadius: 16)).shadow(radius: 3)
+                    Text("ConDict").font(.title).bold().fontDesign(.serif)
+                    Text("Release 2.0").foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+            }
+            
+            Section("What's New in Release 2.0") {
+                FeatureRow(icon: "macwindow", text: "macOS System Settings", subtext: "A completely redesigned, native settings experience.")
+                FeatureRow(icon: "textformat.alt", text: "Rich Text Editor", subtext: "Format definitions using standard keyboard shortcuts.")
+                FeatureRow(icon: "sidebar.left", text: "UI Polish", subtext: "New sidebar navigation, modern pickers, and dynamic app icons.")
+                FeatureRow(icon: "wand.and.stars", text: "Bug Fixes", subtext: "Fixed a critical crash when exporting dictionary data.")
+                FeatureRow(icon: "xmark.bin", text: "Deprecations", subtext: "The titlebar Export button has been removed. All data management is now handled exclusively in Settings.")
+            }
+            
+            Section {
+                Button("View Version History") { showHistory = true }
+            }
         }
+        .formStyle(.grouped)
+        .navigationTitle("About")
         .sheet(isPresented: $showHistory) {
             VersionHistoryView()
         }
@@ -422,6 +387,14 @@ struct VersionHistoryView: View {
         VStack {
             Text("Version History").font(.title2).bold().padding()
             List {
+                Section("Release 2.0") {
+                    Text("• Redesigned Settings App")
+                    Text("• Added Native Rich Text Editor")
+                    Text("• Moved Statistics to Menubar")
+                    Text("• Native macOS Pickers & UI Polish")
+                    Text("• Added Dynamic App Icons")
+                    Text("• Fixed JSON Export Crash")
+                }
                 Section("Beta 1.0") {
                     Text("• Added Sound Change Applier")
                     Text("• Added Etymology Trees")

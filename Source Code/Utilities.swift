@@ -69,20 +69,19 @@ struct StatisticsDashboard: View {
     }
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 30) {
-                Text("Language Statistics").font(.system(size: 32, weight: .bold, design: .serif))
-                
-                // Overview Cards
+        Form {
+            Section {
                 HStack(spacing: 20) {
                     StatCard(title: "Total Words", value: "\(libraryWords.count)", icon: "book", color: .blue)
                     StatCard(title: "Word Types", value: "\(posData.count)", icon: "tag", color: .orange)
                     StatCard(title: "Avg Length", value: String(format: "%.1f", averageLength), icon: "ruler", color: .green)
                 }
-                
-                Divider()
-                
-                // Charts
+                .padding(.vertical, 8)
+            } header: {
+                Text("Overview").font(.headline)
+            }
+            
+            Section {
                 HStack(alignment: .top, spacing: 30) {
                     VStack(alignment: .leading) {
                         Text("Part of Speech Distribution").font(.headline)
@@ -97,7 +96,8 @@ struct StatisticsDashboard: View {
                         }
                         .frame(height: 250)
                     }
-                    .padding().background(Color.gray.opacity(0.05)).cornerRadius(12)
+                    
+                    Divider()
                     
                     VStack(alignment: .leading) {
                         Text("Top Origins").font(.headline)
@@ -114,12 +114,11 @@ struct StatisticsDashboard: View {
                             .frame(height: 250)
                         }
                     }
-                    .padding().background(Color.gray.opacity(0.05)).cornerRadius(12)
                 }
-                
-                Divider()
-                
-                // Letter Freq
+                .padding(.vertical, 8)
+            }
+            
+            Section {
                 VStack(alignment: .leading) {
                     Text("Phoneme/Character Frequency").font(.headline)
                     Text("Most common characters used in your dictionary.").font(.caption).foregroundStyle(.secondary)
@@ -133,10 +132,10 @@ struct StatisticsDashboard: View {
                     }
                     .frame(height: 200)
                 }
-                .padding().background(Color.gray.opacity(0.05)).cornerRadius(12)
+                .padding(.vertical, 8)
             }
-            .padding(40)
         }
+        .formStyle(.grouped)
     }
 }
 
@@ -179,79 +178,47 @@ struct SoundChangeApplierView: View {
     var onImport: ((String) -> Void)?
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Header with Cancel
-            HStack {
-                Button("Cancel") { dismiss() }
-                Spacer()
-                Text("Sound Change Applier").font(.headline)
-                Spacer()
-                // Invisible button to balance layout
-                Button("Cancel") { }.opacity(0).disabled(true)
-            }
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            
-            HStack(spacing: 0) {
-                // Left: Controls
-                VStack(alignment: .leading, spacing: 15) {
-                    
-                    // Presets & Selection
-                    HStack {
-                        Menu("Load Preset") {
-                            ForEach(presets) { preset in
-                                Button(preset.name) {
-                                    // Item.swift's SCARule is Codable, so it works directly
-                                    self.rules = preset.rules
+        NavigationSplitView {
+            Form {
+                Section("Presets") {
+                    Menu("Load Preset") {
+                        ForEach(presets) { preset in
+                            Button(preset.name) {
+                                self.rules = preset.rules
+                            }
+                        }
+                        if presets.isEmpty { Text("No saved presets") }
+                    }
+                    Button("Save Preset") { showSavePreset = true }
+                        .disabled(rules.isEmpty || rules.first?.find == "")
+                }
+                
+                Section("Source") {
+                    Menu {
+                        Button("Clear Selection") {
+                            selectedWordToEvolve = nil
+                            inputWord = ""
+                        }
+                        Divider()
+                        if allWords.isEmpty {
+                            Text("No words in dictionary")
+                        } else {
+                            ForEach(allWords) { word in
+                                Button(word.term) {
+                                    selectedWordToEvolve = word
+                                    inputWord = word.term
                                 }
                             }
-                            if presets.isEmpty { Text("No saved presets") }
                         }
-                        
-                        Spacer()
-                        
-                        Button("Save Preset") { showSavePreset = true }
-                            .disabled(rules.isEmpty || rules.first?.find == "")
+                    } label: {
+                        Text(selectedWordToEvolve?.term ?? "Select Existing Word...")
                     }
                     
-                    Divider()
-                    
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Source").font(.caption).bold().foregroundStyle(.secondary)
-                        HStack {
-                            Menu {
-                                Button("Clear Selection") {
-                                    selectedWordToEvolve = nil
-                                    inputWord = ""
-                                }
-                                Divider()
-                                if allWords.isEmpty {
-                                    Text("No words in dictionary")
-                                } else {
-                                    ForEach(allWords) { word in
-                                        Button(word.term) {
-                                            selectedWordToEvolve = word
-                                            inputWord = word.term
-                                        }
-                                    }
-                                }
-                            } label: {
-                                Text(selectedWordToEvolve?.term ?? "Select Existing Word...")
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .menuStyle(.borderedButton)
-                            .frame(maxWidth: 180)
-                            
-                            TextField("Proto-Word", text: $inputWord)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.body, design: .monospaced))
-                        }
-                    }
-                    
-                    Divider()
-                    
-                    Text("Rules (Regex)").font(.caption).bold().foregroundStyle(.secondary)
-                    
+                    TextField("Proto-Word", text: $inputWord)
+                        .font(.system(.body, design: .monospaced))
+                }
+                
+                Section("Rules (Regex)") {
                     List {
                         ForEach($rules) { $rule in
                             HStack {
@@ -271,75 +238,79 @@ struct SoundChangeApplierView: View {
                         Spacer()
                         Button("Clear Rules") { rules = [SCARule(find: "", replace: "")] }
                     }
-                    
+                    .buttonStyle(.borderless)
+                }
+                
+                Section {
                     Button(action: applyRules) {
                         HStack {
                             Text("Preview Evolution")
+                            Spacer()
                             Image(systemName: "eye")
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(8)
-                        .background(Color.gray.opacity(0.2))
-                        .cornerRadius(8)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Applier")
+            .navigationSplitViewColumnWidth(min: 300, ideal: 350)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            VStack(spacing: 30) {
+                Spacer()
+                
+                VStack(spacing: 10) {
+                    Text("Result")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(outputWord.isEmpty ? "..." : outputWord)
+                        .font(.system(size: 40, weight: .bold, design: .serif))
+                        .textSelection(.enabled)
+                        .multilineTextAlignment(.center)
+                }
+                
+                if !outputWord.isEmpty {
+                    Button(action: { showApplyConfirmation = true }) {
+                        HStack {
+                            Text("Use This Evolution")
+                            Image(systemName: "checkmark.circle")
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(Color.accentColor)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                }
-                .padding()
-                .frame(width: 350)
-                
-                Divider()
-                
-                // Right: Output
-                VStack(spacing: 30) {
-                    Spacer()
-                    
-                    VStack(spacing: 10) {
-                        Text("Result")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
+                    .confirmationDialog("Apply Changes", isPresented: $showApplyConfirmation) {
+                        Button("Update '\(inputWord)' Only") {
+                            applyToSingle()
+                        }
                         
-                        Text(outputWord.isEmpty ? "..." : outputWord)
-                            .font(.system(size: 40, weight: .bold, design: .serif))
-                            .textSelection(.enabled)
-                            .multilineTextAlignment(.center)
-                    }
-                    
-                    if !outputWord.isEmpty {
-                        Button(action: { showApplyConfirmation = true }) {
-                            HStack {
-                                Text("Use This Evolution")
-                                Image(systemName: "checkmark.circle")
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
-                            .background(Color.accentColor)
-                            .foregroundStyle(.white)
-                            .clipShape(Capsule())
+                        Button("Update ALL Words (\(allWords.count))", role: .destructive) {
+                            applyToAll()
                         }
-                        .buttonStyle(.plain)
-                        .confirmationDialog("Apply Changes", isPresented: $showApplyConfirmation) {
-                            Button("Update '\(inputWord)' Only") {
-                                applyToSingle()
-                            }
-                            
-                            Button("Update ALL Words (\(allWords.count))", role: .destructive) {
-                                applyToAll()
-                            }
-                            
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            Text("Do you want to update just the selected word, or apply these sound changes to every word in your dictionary?")
-                        }
+                        
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Do you want to update just the selected word, or apply these sound changes to every word in your dictionary?")
                     }
-                    
-                    Spacer()
                 }
-                .padding(40)
-                .frame(maxWidth: .infinity)
-                .background(Color.gray.opacity(0.05))
+                
+                Spacer()
+            }
+            .padding(40)
+            .frame(maxWidth: .infinity)
+            .background(Color.gray.opacity(0.05))
+            .navigationTitle("Sound Change Applier")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
             }
         }
-        .frame(width: 750, height: 550)
+        .frame(width: 800, height: 600)
         .alert("Save Preset", isPresented: $showSavePreset) {
             TextField("Preset Name", text: $newPresetName)
             Button("Save") {
@@ -532,13 +503,9 @@ struct RichTextEditor: NSViewRepresentable {
         textView.isEditable = true
         textView.isSelectable = true
         textView.allowsUndo = true
-        textView.usesInspectorBar = true // Adds the rich text toolbar!
+        textView.usesInspectorBar = false // HIDDEN
         textView.backgroundColor = .clear
         textView.delegate = context.coordinator
-        
-        // Initial setup
-        textView.string = text
-        textView.font = .systemFont(ofSize: 14)
         
         // Auto-resize
         textView.minSize = NSSize(width: 0, height: 100)
@@ -555,16 +522,24 @@ struct RichTextEditor: NSViewRepresentable {
     
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
-        if textView.string != text {
-            textView.string = text
+        if context.coordinator.isEditing { return }
+        
+        if text.hasPrefix("{\\rtf1") {
+            if let data = text.data(using: .utf8),
+               let attrStr = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
+                if !textView.attributedString().isEqual(to: attrStr) {
+                    textView.textStorage?.setAttributedString(attrStr)
+                }
+            }
+        } else {
+            if textView.string != text {
+                textView.string = text
+                textView.font = .systemFont(ofSize: 14)
+            }
         }
     }
     
-    // FIXED: This cleans up the formatting bar when editing stops
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
-        if let textView = nsView.documentView as? NSTextView {
-            textView.usesInspectorBar = false
-        }
     }
     
     func makeCoordinator() -> Coordinator {
@@ -573,14 +548,29 @@ struct RichTextEditor: NSViewRepresentable {
     
     class Coordinator: NSObject, NSTextViewDelegate {
         var parent: RichTextEditor
+        var isEditing = false
         
         init(_ parent: RichTextEditor) {
             self.parent = parent
         }
         
+        func textDidBeginEditing(_ notification: Notification) {
+            isEditing = true
+        }
+        
+        func textDidEndEditing(_ notification: Notification) {
+            isEditing = false
+        }
+        
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            self.parent.text = textView.string
+            let attrStr = textView.attributedString()
+            if let data = try? attrStr.data(from: NSRange(location: 0, length: attrStr.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]),
+               let rtf = String(data: data, encoding: .utf8) {
+                self.parent.text = rtf
+            } else {
+                self.parent.text = textView.string
+            }
         }
     }
 }

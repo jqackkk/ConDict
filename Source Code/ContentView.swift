@@ -21,6 +21,7 @@ enum SortOption: String, CaseIterable, Identifiable {
 }
 
 struct ContentView: View {
+    init() {}
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openWindow) private var openWindow
     @Environment(\.undoManager) var undoManager
@@ -57,13 +58,22 @@ struct ContentView: View {
     
     @State private var activeInfoPopover: PersistentIdentifier?
     @State private var isShowingExport = false
-    @State private var document: JSONDocument?
+    @State private var document = JSONDocument()
     
     var partsOfSpeech = ["All", "Noun", "Verb", "Adjective", "Adverb", "Pronoun", "Particle", "Conjunction", "Interjection", "Other"]
     
     func getCustomFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         if selectedFont == "System" { return .system(size: size, weight: weight, design: .serif) }
         else { return .custom(selectedFont, size: size).weight(weight) }
+    }
+    
+    func getPlainText(from rtf: String) -> String {
+        if rtf.hasPrefix("{\\rtf1"),
+           let data = rtf.data(using: .utf8),
+           let attrStr = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
+            return attrStr.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return rtf
     }
     
     var colorScheme: ColorScheme? {
@@ -121,15 +131,55 @@ struct ContentView: View {
             }
         }
     }
+    enum SidebarSelection: Hashable {
+        case allWords
+        case library(PersistentIdentifier)
+        case folder(PersistentIdentifier)
+        case word(PersistentIdentifier)
+    }
+    
+    private var sidebarSelectionBinding: Binding<SidebarSelection?> {
+        Binding(
+            get: {
+                if let w = selectedWord { return .word(w.persistentModelID) }
+                if let f = selectedFolder { return .folder(f.persistentModelID) }
+                if showAllWordsGlobal { return .allWords }
+                if let l = selectedLibraryID { return .library(l) }
+                return nil
+            },
+            set: { val in
+                if case .word(let id) = val {
+                    selectedWord = filteredWords.first { $0.persistentModelID == id }
+                    showStatistics = false
+                } else {
+                    selectedWord = nil
+                    showAllWordsGlobal = false
+                    showStatistics = false
+                    
+                    if case .folder(let id) = val {
+                        selectedFolder = allFolders.first { $0.persistentModelID == id }
+                        selectedLibraryID = selectedFolder?.library?.persistentModelID ?? selectedLibraryID
+                    } else if case .library(let id) = val {
+                        selectedFolder = nil
+                        selectedLibraryID = id
+                    } else if val == .allWords {
+                        selectedFolder = nil
+                        showAllWordsGlobal = true
+                    }
+                }
+            }
+        )
+    }
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedWord) {
-                // Extracted Sections to reduce compiler load
+            List(selection: sidebarSelectionBinding) {
                 librarySection
                 folderSection
                 wordSection
             }
+            .listStyle(.sidebar)
+            .navigationTitle("ConDict")
             .navigationSplitViewColumnWidth(min: 220, ideal: 250)
             .searchable(text: $searchText, placement: .sidebar)
             .safeAreaInset(edge: .bottom) {
@@ -143,7 +193,6 @@ struct ContentView: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .padding().background(.regularMaterial)
             }
-            
         } detail: {
             if showStatistics {
                 StatisticsDashboard(library: currentLibrary)
@@ -169,9 +218,7 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: { isShowingAddSheet = true }) { Label("Add Word", systemImage: "plus") }
             }
-            ToolbarItem(placement: .automatic) {
-                Button(action: prepareExport) { Label("Export JSON", systemImage: "square.and.arrow.up") }
-            }
+
             ToolbarItem(placement: .automatic) {
                 Menu {
                     Button(action: { showSCA = true }) { Label("Sound Change Applier", systemImage: "wand.and.stars") }
@@ -179,15 +226,28 @@ struct ContentView: View {
                 } label: { Label("Tools", systemImage: "hammer") }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ShowStatistics"))) { _ in
+            showStatistics = true
+            selectedWord = nil
+        }
         .sheet(isPresented: $isShowingAddSheet) {
             AddWordView(targetFolder: selectedFolder, targetLibrary: currentLibrary, selectedFont: selectedFont).preferredColorScheme(colorScheme)
         }
         .sheet(isPresented: $isShowingFolderSheet) {
             NavigationStack {
-                Form {
-                    TextField("Folder Name", text: $newName)
-                    TextField("Tags (comma separated)", text: $newFolderTags)
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Folder Name")
+                        TextField("Name", text: $newName).textFieldStyle(.roundedBorder)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Tags (optional)")
+                        TextField("Comma separated tags...", text: $newFolderTags).textFieldStyle(.roundedBorder)
+                    }
+                    Spacer()
                 }
+                .padding()
                 .navigationTitle("New Folder")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { isShowingFolderSheet = false } }
@@ -210,9 +270,7 @@ struct ContentView: View {
         .sheet(isPresented: $showGrammarManager) {
             GrammarManagerView(library: currentLibrary)
         }
-        .fileExporter(isPresented: $isShowingExport, document: document, contentType: .json, defaultFilename: "ConDict_Export") { result in
-            if case .success(let url) = result { print("Saved to \(url)") }
-        }
+
         .onAppear {
             if libraries.isEmpty {
                 let defaultLib = Library(name: "My Dictionary")
@@ -229,65 +287,14 @@ struct ContentView: View {
     @ViewBuilder
     private var librarySection: some View {
         Section("Libraries") {
-            // Dashboard Button
-            if currentLibrary != nil {
-                Button(action: { showStatistics = true }) {
-                    HStack {
-                        Image(systemName: "chart.bar.xaxis")
-                        Text("Statistics")
-                        Spacer()
-                    }
-                    .padding(8)
-                    .background(showStatistics ? Color.accentColor : Color.clear)
-                    .foregroundStyle(showStatistics ? .white : .primary)
-                    .cornerRadius(8)
-                }
-                .buttonStyle(.plain)
-                .tag(nil as Folder?)
-            }
-            
-            Button(action: {
-                showAllWordsGlobal = true; selectedLibraryID = nil; selectedFolder = nil; showStatistics = false
-            }) {
-                HStack {
-                    Image(systemName: "tray.2")
-                    Text("All Words")
-                    Spacer()
-                }
-                .padding(8)
-                .background(showAllWordsGlobal ? Color.accentColor : Color.gray.opacity(0.1))
-                .foregroundStyle(showAllWordsGlobal ? .white : .primary)
-                .cornerRadius(8)
-            }
-            .buttonStyle(.plain)
-            .tag(nil as Folder?)
+            Label("All Words", systemImage: "tray.2")
+                .tag(SidebarSelection.allWords)
             
             if !libraries.isEmpty {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 10) {
-                    ForEach(libraries) { lib in
-                        Button(action: {
-                            showAllWordsGlobal = false
-                            selectedLibraryID = lib.persistentModelID
-                            selectedFolder = nil
-                            showStatistics = false
-                        }) {
-                            VStack {
-                                Image(systemName: "books.vertical")
-                                    .font(.title2)
-                                    .foregroundStyle(selectedLibraryID == lib.persistentModelID ? .white : Color.accentColor)
-                                Text(lib.name)
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                    .foregroundStyle(selectedLibraryID == lib.persistentModelID ? .white : .primary)
-                            }
-                            .frame(maxWidth: .infinity).padding(10)
-                            .background(selectedLibraryID == lib.persistentModelID ? Color.accentColor : Color.gray.opacity(0.1))
-                            .cornerRadius(8)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                ForEach(libraries) { lib in
+                    Label(lib.name, systemImage: "books.vertical")
+                        .tag(SidebarSelection.library(lib.persistentModelID))
                 }
-                .padding(.vertical, 5)
             }
         }
     }
@@ -296,32 +303,16 @@ struct ContentView: View {
     private var folderSection: some View {
         if currentLibrary != nil {
             Section("Folders") {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 10) {
-                    ForEach(visibleFolders) { folder in
-                        Button(action: { selectedFolder = folder; showStatistics = false }) {
-                            VStack {
-                                Image(systemName: folder.icon).font(.title2).foregroundStyle(selectedFolder == folder ? .white : Color.accentColor)
-                                Text(folder.name).font(.caption).lineLimit(1).foregroundStyle(selectedFolder == folder ? .white : .primary)
-                            }
-                            .frame(maxWidth: .infinity).padding(10)
-                            .background(selectedFolder == folder ? Color.accentColor : Color.gray.opacity(0.1))
-                            .cornerRadius(8)
-                        }
-                        .buttonStyle(.plain)
+                ForEach(visibleFolders) { folder in
+                    Label(folder.name, systemImage: folder.icon)
+                        .tag(SidebarSelection.folder(folder.persistentModelID))
                         .contextMenu { Button("Delete", role: .destructive) { deleteFolder(folder) } }
-                    }
-                    Button(action: { newName = ""; newFolderTags = ""; isShowingFolderSheet = true }) {
-                        VStack {
-                            Image(systemName: "plus").font(.title2).foregroundStyle(.secondary)
-                            Text("New").font(.caption).foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity).padding(10)
-                        .background(Color.clear)
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5])).foregroundStyle(.secondary.opacity(0.5)))
-                    }
-                    .buttonStyle(.plain)
                 }
-                .padding(.vertical, 5)
+                Button(action: { newName = ""; newFolderTags = ""; isShowingFolderSheet = true }) {
+                    Label("New Folder", systemImage: "plus")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
         }
     }
@@ -330,31 +321,29 @@ struct ContentView: View {
     private var wordSection: some View {
         Section(selectedFolder?.name ?? (showAllWordsGlobal ? "All Words" : (currentLibrary?.name ?? "Library"))) {
             ForEach(filteredWords) { word in
-                NavigationLink(value: word) {
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(word.term).font(getCustomFont(size: 16, weight: .bold))
-                            Text(word.definition).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(word.term).font(getCustomFont(size: 16, weight: .bold))
+                        Text(getPlainText(from: word.definition)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    if word.isPinned {
+                        Image(systemName: "pin.fill").font(.caption).foregroundStyle(.white)
+                    }
+                    VStack(spacing: 4) {
+                        Button(action: { activeInfoPopover = word.persistentModelID }) {
+                            Image(systemName: "info.circle").foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        VStack(spacing: 4) {
-                            Button(action: { activeInfoPopover = word.persistentModelID }) {
-                                Image(systemName: "info.circle").foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .popover(isPresented: Binding(get: { activeInfoPopover == word.persistentModelID }, set: { if !$0 { activeInfoPopover = nil } }), arrowEdge: .trailing) {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text("Part of Speech: \(word.partOfSpeech)").font(.caption).bold()
-                                    if !word.locationTags.isEmpty { Text("Origin: \(word.locationTags.joined(separator: ", "))").font(.caption) }
-                                }.padding()
-                            }
-                            if word.isPinned {
-                                Image(systemName: "pin.fill").font(.caption).foregroundStyle(.white)
-                            }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: Binding(get: { activeInfoPopover == word.persistentModelID }, set: { if !$0 { activeInfoPopover = nil } }), arrowEdge: .trailing) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Part of Speech: \(word.partOfSpeech)").font(.caption).bold()
+                                if !word.locationTags.isEmpty { Text("Origin: \(word.locationTags.joined(separator: ", "))").font(.caption) }
+                            }.padding()
                         }
                     }
-                    .padding(.vertical, 3)
                 }
+                .tag(SidebarSelection.word(word.persistentModelID))
                 .contextMenu {
                     Button(word.isPinned ? "Unpin" : "Pin") { word.isPinned.toggle() }
                     Button("Delete", role: .destructive) { deleteWord(word) }
@@ -395,21 +384,7 @@ struct ContentView: View {
         }
     }
     
-    private func prepareExport() {
-        let exportData = allWords.map {
-            WordExport(
-                term: $0.term, pronunciation: $0.pronunciation, definition: $0.definition, partOfSpeech: $0.partOfSpeech,
-                example: $0.example, notes: $0.notes, translations: $0.translations, variations: $0.variations,
-                tags: $0.tags, locationTags: $0.locationTags, isPinned: $0.isPinned, folderName: $0.folder?.name, libraryName: $0.library?.name,
-                parentWordTerm: $0.parentWord?.term,
-                inflectionData: $0.inflectionData
-            )
-        }
-        if let data = try? JSONEncoder().encode(exportData) {
-            self.document = JSONDocument(data: data)
-            self.isShowingExport = true
-        }
-    }
+
 }
 
 // MARK: - Detail Container
@@ -457,189 +432,238 @@ struct WordDisplayView: View {
         else { return .custom(selectedFont, size: size).weight(weight) }
     }
     
+    @ViewBuilder
+    var definitionView: some View {
+        if word.definition.hasPrefix("{\\rtf1"),
+           let data = word.definition.data(using: .utf8),
+           let attrStr = try? NSMutableAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
+            
+            let _ = {
+                let range = NSRange(location: 0, length: attrStr.length)
+                attrStr.enumerateAttribute(.font, in: range, options: []) { value, r, stop in
+                    if let oldFont = value as? NSFont {
+                        let newSize: CGFloat = 22
+                        var newFont = oldFont
+                        
+                        if selectedFont != "System" {
+                            let traits = NSFontManager.shared.traits(of: oldFont)
+                            if let customFont = NSFontManager.shared.font(withFamily: selectedFont, traits: traits, weight: 5, size: newSize) {
+                                newFont = customFont
+                            } else {
+                                newFont = NSFontManager.shared.convert(oldFont, toSize: newSize)
+                            }
+                        } else {
+                            newFont = NSFontManager.shared.convert(oldFont, toSize: newSize)
+                        }
+                        
+                        attrStr.addAttribute(.font, value: newFont, range: r)
+                    }
+                }
+                attrStr.removeAttribute(.foregroundColor, range: range)
+            }()
+            
+            if let string = try? AttributedString(attrStr, including: \.appKit) {
+                Text(string).lineSpacing(4).textSelection(.enabled)
+            } else {
+                Text(.init(word.definition)).font(getCustomFont(size: 22)).lineSpacing(4).textSelection(.enabled)
+            }
+        } else {
+            Text(.init(word.definition)).font(getCustomFont(size: 22)).lineSpacing(4).textSelection(.enabled)
+        }
+    }
+    
     var body: some View {
         ScrollView {
-            HStack(alignment: .top, spacing: 20) {
-                VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 30) {
+                // Header Region
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(word.term).font(getCustomFont(size: 48, weight: .bold)).textSelection(.enabled)
                     
-                    // Header
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(word.term).font(getCustomFont(size: 48, weight: .bold)).textSelection(.enabled)
+                    if !word.pronunciation.isEmpty {
+                        HStack(spacing: 4) {
+                            Text("/\(word.pronunciation)/").font(.system(.title3, design: .monospaced)).foregroundStyle(.secondary)
+                            Button(action: { speak(word.pronunciation, isIPA: true) }) {
+                                Image(systemName: "speaker.wave.2.circle").foregroundStyle(.tint)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    
+                    // Side-by-side Part of Speech and Tags
+                    HStack {
+                        Text(word.partOfSpeech)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.accentColor.opacity(0.1))
+                            .foregroundStyle(Color.accentColor)
+                            .clipShape(Capsule())
                         
-                        HStack(spacing: 12) {
-                            if !word.pronunciation.isEmpty {
-                                HStack(spacing: 4) {
-                                    Text("/\(word.pronunciation)/").font(.system(.title3, design: .monospaced)).foregroundStyle(.secondary)
-                                    Button(action: { speak(word.pronunciation, isIPA: true) }) {
-                                        Image(systemName: "speaker.wave.2.circle").foregroundStyle(.tint)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            Text(word.partOfSpeech).font(.subheadline).fontWeight(.medium).padding(.horizontal, 10).padding(.vertical, 4).background(Color.accentColor.opacity(0.1)).foregroundStyle(Color.accentColor).clipShape(Capsule())
+                        ForEach(word.tags, id: \.self) { tag in
+                            Text("#\(tag)")
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(4)
                         }
                         
-                        if !word.tags.isEmpty || !word.locationTags.isEmpty {
-                            HStack {
-                                ForEach(word.tags, id: \.self) { tag in
-                                    Text("#\(tag)").font(.caption).padding(4).background(Color.gray.opacity(0.1)).cornerRadius(4)
-                                }
-                                ForEach(word.locationTags, id: \.self) { loc in
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "mappin").font(.caption2)
-                                        Text(loc).font(.caption)
-                                    }
-                                    .padding(4).background(Color.accentColor).foregroundStyle(.white).cornerRadius(4)
-                                }
+                        ForEach(word.locationTags, id: \.self) { loc in
+                            HStack(spacing: 4) {
+                                Image(systemName: "mappin").font(.caption2)
+                                Text(loc).font(.caption)
                             }
-                        }
-                    }
-                    Divider()
-                    
-                    // Definition
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Definition", systemImage: "book.closed").font(.headline).foregroundStyle(.secondary)
-                        Text(.init(word.definition)).font(getCustomFont(size: 22)).lineSpacing(4).textSelection(.enabled)
-                    }
-                    
-                    // Relationships
-                    if let related = word.relatedWords, !related.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("Related Words", systemImage: "link").font(.headline).foregroundStyle(.secondary)
-                            FlowLayout(spacing: 8) {
-                                ForEach(related) { relWord in
-                                    Button(action: { onJump(relWord) }) {
-                                        Text(relWord.term)
-                                            .padding(6)
-                                            .background(Color.accentColor.opacity(0.1))
-                                            .cornerRadius(6)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
-                    
-                    // --- BETA 1.0 SECTIONS ---
-                    if word.parentWord != nil || !(word.derivedWords?.isEmpty ?? true) {
-                        VStack(alignment: .leading) {
-                            Label("Etymology", systemImage: "tree").font(.headline).foregroundStyle(.secondary)
-                            if let parent = word.parentWord {
-                                HStack {
-                                    Text("From")
-                                    Button(parent.term) { onJump(parent) }.buttonStyle(.link)
-                                }
-                            }
-                            if let children = word.derivedWords, !children.isEmpty {
-                                Text("Derivations: " + children.map { $0.term }.joined(separator: ", "))
-                                    .font(.caption)
-                            }
-                            Button("View Family Tree") { showEtymologyTree = true }.padding(.top, 5)
-                        }
-                        .padding().background(Color.gray.opacity(0.1)).cornerRadius(8)
-                    }
-                    
-                    if let schema = word.inflectionSchema {
-                        VStack(alignment: .leading) {
-                            Label(schema.name, systemImage: "tablecells").font(.headline)
-                            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
-                                GridRow {
-                                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
-                                    ForEach(schema.colHeaders, id: \.self) { col in Text(col).bold() }
-                                }
-                                ForEach(schema.rowHeaders, id: \.self) { row in
-                                    GridRow {
-                                        Text(row).bold()
-                                        ForEach(schema.colHeaders, id: \.self) { col in
-                                            let key = "\(row)_\(col)"
-                                            Text(inflectionData[key] ?? "-").padding(5).background(Color.white).cornerRadius(4)
-                                        }
-                                    }
-                                }
-                            }
-                            .padding().background(Color.gray.opacity(0.1)).cornerRadius(8)
-                        }
-                    }
-                    
-                    // Example
-                    if !word.example.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("Example", systemImage: "quote.opening").font(.headline).foregroundStyle(.secondary)
-                            Text(word.example).font(getCustomFont(size: 18)).italic().padding().frame(maxWidth: .infinity, alignment: .leading).background(Color.gray.opacity(0.05)).cornerRadius(8)
-                        }
-                    }
-                    
-                    // Variations
-                    if !word.variations.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label("Variations", systemImage: "map").font(.headline).foregroundStyle(.secondary)
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 10) {
-                                ForEach(word.variations) { variant in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack {
-                                            Text(variant.name).font(.headline)
-                                            Spacer()
-                                            
-                                            Button(action: { activePopover = variant.id }) {
-                                                Image(systemName: "mappin.circle").foregroundStyle(Color.accentColor).font(.title3)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .popover(isPresented: Binding(get: { activePopover == variant.id }, set: { if !$0 { activePopover = nil } }), arrowEdge: .bottom) {
-                                                VStack(alignment: .leading, spacing: 4) {
-                                                    Text("Location").font(.caption).foregroundStyle(.secondary)
-                                                    Text(variant.location).font(.headline)
-                                                    if !variant.gender.isEmpty {
-                                                        Divider()
-                                                        Text("Gender: \(variant.gender)").font(.caption).foregroundStyle(.secondary)
-                                                    }
-                                                }.padding().frame(minWidth: 150)
-                                            }
-                                        }
-                                        if !variant.gender.isEmpty {
-                                            Text(variant.gender).font(.caption).padding(2).background(Color.orange.opacity(0.2)).cornerRadius(4)
-                                        }
-                                        HStack {
-                                            Text("/\(variant.pronunciation)/").font(.caption).foregroundStyle(.secondary)
-                                            Spacer()
-                                            Button(action: { speak(variant.pronunciation, isIPA: true) }) { Image(systemName: "speaker.wave.1").font(.caption) }.buttonStyle(.plain)
-                                        }
-                                    }
-                                    .padding(10).background(Color.gray.opacity(0.1)).cornerRadius(8)
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Translations
-                    if !word.translations.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label("Translations", systemImage: "globe").font(.headline).foregroundStyle(.secondary)
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 10) {
-                                ForEach(word.translations) { trans in
-                                    HStack {
-                                        VStack(alignment: .leading) {
-                                            Text(trans.text).font(.headline)
-                                            Text(trans.language).font(.caption).foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        Button(action: { speak(trans.text) }) { Image(systemName: "speaker.wave.1").font(.caption).foregroundStyle(Color.accentColor) }.buttonStyle(.plain)
-                                    }
-                                    .padding(10).background(Color.gray.opacity(0.1)).cornerRadius(8)
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Notes
-                    if !word.notes.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("Notes", systemImage: "note.text").font(.headline).foregroundStyle(.secondary)
-                            Text(word.notes).font(.body)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.accentColor)
+                            .foregroundStyle(.white)
+                            .cornerRadius(4)
                         }
                     }
                 }
+                
+                Divider()
+                
+                // Definition
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Definition").font(.headline).foregroundStyle(.secondary)
+                    definitionView
+                }
+                
+                // Related Words
+                if let related = word.relatedWords, !related.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Related Words").font(.headline).foregroundStyle(.secondary)
+                        FlowLayout(spacing: 8) {
+                            ForEach(related) { relWord in
+                                Button(action: { onJump(relWord) }) {
+                                    Text(relWord.term)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(Color.accentColor.opacity(0.1))
+                                        .cornerRadius(6)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                
+                // Etymology
+                if word.parentWord != nil || !(word.derivedWords?.isEmpty ?? true) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Etymology").font(.headline).foregroundStyle(.secondary)
+                        if let parent = word.parentWord {
+                            HStack {
+                                Text("From")
+                                Button(parent.term) { onJump(parent) }.buttonStyle(.link)
+                            }
+                        }
+                        if let children = word.derivedWords, !children.isEmpty {
+                            Text("Derivations: " + children.map { $0.term }.joined(separator: ", "))
+                                .font(.caption)
+                        }
+                        Button("View Family Tree") { showEtymologyTree = true }.padding(.top, 5)
+                    }
+                }
+                
+                // Grammar Table
+                if let schema = word.inflectionSchema {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(schema.name).font(.headline).foregroundStyle(.secondary)
+                        Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
+                            GridRow {
+                                Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                                ForEach(schema.colHeaders, id: \.self) { col in Text(col).bold() }
+                            }
+                            ForEach(schema.rowHeaders, id: \.self) { row in
+                                GridRow {
+                                    Text(row).bold()
+                                    ForEach(schema.colHeaders, id: \.self) { col in
+                                        let key = "\(row)_\(col)"
+                                        Text(inflectionData[key] ?? "-").padding(5).background(Color.secondary.opacity(0.1)).cornerRadius(4)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Example
+                if !word.example.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Example").font(.headline).foregroundStyle(.secondary)
+                        Text(word.example).font(getCustomFont(size: 18)).italic()
+                    }
+                }
+                
+                // Variations
+                if !word.variations.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Variations").font(.headline).foregroundStyle(.secondary)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 10) {
+                            ForEach(word.variations) { variant in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(variant.name).font(.headline)
+                                        Spacer()
+                                        Button(action: { activePopover = variant.id }) {
+                                            Image(systemName: "info.circle").foregroundStyle(Color.accentColor).font(.title3)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .popover(isPresented: Binding(get: { activePopover == variant.id }, set: { if !$0 { activePopover = nil } }), arrowEdge: .bottom) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text("Location").font(.caption).foregroundStyle(.secondary)
+                                                Text(variant.location).font(.headline)
+                                            }.padding().frame(minWidth: 150)
+                                        }
+                                    }
+                                    if !variant.gender.isEmpty {
+                                        Text(variant.gender).font(.caption).padding(2).background(Color.orange.opacity(0.2)).cornerRadius(4)
+                                    }
+                                    HStack {
+                                        Text("/\(variant.pronunciation)/").font(.caption).foregroundStyle(.secondary)
+                                        Spacer()
+                                        Button(action: { speak(variant.pronunciation, isIPA: true) }) { Image(systemName: "speaker.wave.1").font(.caption) }.buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(10).background(Color.secondary.opacity(0.1)).cornerRadius(8)
+                            }
+                        }
+                    }
+                }
+                
+                // Translations
+                if !word.translations.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Translations").font(.headline).foregroundStyle(.secondary)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 10) {
+                            ForEach(word.translations) { trans in
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(trans.text).font(.headline)
+                                        Text(trans.language).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Button(action: { speak(trans.text) }) { Image(systemName: "speaker.wave.1").font(.caption).foregroundStyle(Color.accentColor) }.buttonStyle(.plain)
+                                }
+                                .padding(10).background(Color.secondary.opacity(0.1)).cornerRadius(8)
+                            }
+                        }
+                    }
+                }
+                
+                // Notes
+                if !word.notes.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Notes").font(.headline).foregroundStyle(.secondary)
+                        Text(word.notes).font(.body)
+                    }
+                }
             }
-            .padding(40)
+            .padding(30)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .sheet(isPresented: $showEtymologyTree) {
             EtymologyTreeView(word: word)
@@ -731,7 +755,7 @@ struct WordEditForm: View {
                         Picker("Folder", selection: $word.folder) {
                             Text("None").tag(nil as Folder?)
                             ForEach(folders) { folder in Text(folder.name).tag(folder as Folder?) }
-                        }.pickerStyle(.menu).frame(maxWidth: 200)
+                        }.pickerStyle(.menu)
                         
                         TextField("Location Tags", text: Binding(
                             get: { word.locationTags.joined(separator: ", ") },
@@ -743,21 +767,23 @@ struct WordEditForm: View {
                     RichTextEditor(text: $word.definition).frame(height: 150).border(Color.gray.opacity(0.2), width: 1)
                     
                     // --- BETA 1.0 EDITS ---
-                    VStack(alignment: .leading) {
-                        Text("Etymology (Parent Word)").font(.caption).bold()
-                        Menu {
-                            Button("None") { word.parentWord = nil }
-                            ForEach(allWords) { w in if w.id != word.id { Button(w.term) { word.parentWord = w } } }
-                        } label: {
-                            Text(word.parentWord?.term ?? "Select Parent...").frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                    Picker("Etymology (Parent Word)", selection: $word.parentWord) {
+                        Text("None").tag(nil as Word?)
+                        ForEach(allWords) { w in if w.id != word.id { Text(w.term).tag(w as Word?) } }
                     }
                     
                     VStack(alignment: .leading) {
-                        Text("Conjugation Table").font(.caption).bold()
-                        Picker("Schema", selection: $word.inflectionSchema) {
+                        Picker("Conjugation Table", selection: $word.inflectionSchema) {
                             Text("None").tag(nil as InflectionSchema?)
                             ForEach(allSchemas) { schema in Text(schema.name).tag(schema as InflectionSchema?) }
+                        }
+                        .onChange(of: word.inflectionSchema) { newSchema in
+                            if let newSchema = newSchema, let defaultDataString = newSchema.defaultData, word.inflectionData.isEmpty || word.inflectionData == "{}" {
+                                word.inflectionData = defaultDataString
+                                if let data = defaultDataString.data(using: .utf8), let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
+                                    gridValues = decoded
+                                }
+                            }
                         }
                         if let schema = word.inflectionSchema {
                             VStack {
@@ -867,15 +893,19 @@ struct WordEditForm: View {
         .sheet(isPresented: $showingRelWordSheet) {
             VStack {
                 Text("Link a Word").font(.headline)
-                List(allWords.filter { $0.id != word.id }) { cand in
-                    Button(cand.term) {
-                        if word.relatedWords == nil { word.relatedWords = [] }
-                        if !(word.relatedWords?.contains(cand) ?? false) { word.relatedWords?.append(cand) }
-                        showingRelWordSheet = false
-                    }.buttonStyle(.plain)
+                if allWords.filter({ $0.id != word.id }).isEmpty {
+                    ContentUnavailableView("No Other Words", systemImage: "link", description: Text("Add more words to create relationships."))
+                } else {
+                    List(allWords.filter { $0.id != word.id }) { cand in
+                        Button(cand.term) {
+                            if word.relatedWords == nil { word.relatedWords = [] }
+                            if !(word.relatedWords?.contains(cand) ?? false) { word.relatedWords?.append(cand) }
+                            showingRelWordSheet = false
+                        }.buttonStyle(.plain)
+                    }
                 }
                 Button("Cancel") { showingRelWordSheet = false }.padding()
-            }.frame(width: 300, height: 400)
+            }.frame(width: 300, height: 400).padding(.top)
         }
     }
     
@@ -1029,43 +1059,41 @@ struct GrammarManagerView: View {
     @State private var rows: [String] = []
     @State private var cols: [String] = []
     @State private var newCol = ""
+    @State private var defaultValues: [String: String] = [:]
     
     var body: some View {
-        NavigationStack {
-            HStack(spacing: 0) {
-                // List of existing
-                List {
-                    ForEach(schemas) { schema in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(schema.name).font(.headline)
-                                Text("\(schema.rowHeaders.count) rows x \(schema.colHeaders.count) cols")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button(role: .destructive) {
-                                modelContext.delete(schema)
-                            } label: {
-                                Image(systemName: "trash").foregroundStyle(.red)
-                            }
-                            .buttonStyle(.plain)
+        NavigationSplitView {
+            List(selection: .constant(nil as InflectionSchema?)) {
+                ForEach(schemas) { schema in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(schema.name).font(.headline)
+                            Text("\(schema.rowHeaders.count) rows x \(schema.colHeaders.count) cols")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
-                    }
-                    .onDelete { idx in
-                        idx.forEach { modelContext.delete(schemas[$0]) }
+                        Spacer()
+                        Button(role: .destructive) {
+                            modelContext.delete(schema)
+                        } label: {
+                            Image(systemName: "trash").foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                .frame(width: 250)
-                
-                Divider()
-                
-                // Add New
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("Create New Table Schema").font(.headline)
-                    
+                .onDelete { idx in
+                    idx.forEach { modelContext.delete(schemas[$0]) }
+                }
+            }
+            .navigationTitle("Grammar Tables")
+            .navigationSplitViewColumnWidth(min: 200, ideal: 250)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            Form {
+                Section("Create New Table Schema") {
                     TextField("Name (e.g. Regular Verbs)", text: $newName)
-                        .textFieldStyle(.roundedBorder)
-                    
+                }
+                
+                Section {
                     HStack(alignment: .top, spacing: 20) {
                         // Row Builder
                         VStack(alignment: .leading) {
@@ -1132,21 +1160,52 @@ struct GrammarManagerView: View {
                             .border(Color.gray.opacity(0.2))
                         }
                     }
-                    
+                }
+                
+                if !rows.isEmpty && !cols.isEmpty {
+                    Section("Default Values (Optional)") {
+                        ScrollView(.horizontal) {
+                            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
+                                GridRow {
+                                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                                    ForEach(cols, id: \.self) { col in Text(col).bold() }
+                                }
+                                ForEach(rows, id: \.self) { row in
+                                    GridRow {
+                                        Text(row).bold()
+                                        ForEach(cols, id: \.self) { col in
+                                            let key = "\(row)_\(col)"
+                                            TextField("Default", text: Binding(
+                                                get: { defaultValues[key] ?? "" },
+                                                set: { defaultValues[key] = $0 }
+                                            ))
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 100)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Section {
                     Button("Create Schema") {
                         let newSchema = InflectionSchema(name: newName, rowHeaders: rows, colHeaders: cols, library: library)
+                        if let data = try? JSONEncoder().encode(defaultValues) {
+                            newSchema.defaultData = String(data: data, encoding: .utf8)
+                        }
                         modelContext.insert(newSchema)
                         newName = ""
                         rows = []
                         cols = []
+                        defaultValues = [:]
                     }
                     .disabled(newName.isEmpty || rows.isEmpty || cols.isEmpty)
-                    .buttonStyle(.borderedProminent)
-                    
-                    Spacer()
                 }
-                .padding()
             }
+            .formStyle(.grouped)
+            .navigationTitle("Schema Builder")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
