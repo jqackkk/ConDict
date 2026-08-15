@@ -1,6 +1,6 @@
 <div align="center">
 
-<img width="512" height="512" alt="256 × 256" src="https://github.com/user-attachments/assets/b64ad2da-a541-4a73-b791-32cb8b6f80c1" />
+<img width="128" height="128" alt="AppIcon-iOS-Default-128@1x" src="https://github.com/user-attachments/assets/b0526b56-55a8-4110-b83e-2e32f19df328"/>
 
 <h1>ConDict</h1>
 The Premier Dictionary Manager for Conlangers
