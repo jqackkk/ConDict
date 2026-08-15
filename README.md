@@ -30,8 +30,8 @@ Getting ConDict up and running is simple:
 
 <h1>⏳ Development & Updates</h1>
 
-ConDict is built and maintained by a 15-year-old student developer.
-Because I am balancing high school and work, development speed may vary.
+ConDict is built and maintained by a 16-year-old student developer.
+Because I am balancing high school, dual enrollment, as well as work, development speed may vary.
 
 <h2>Release Schedule</h2>
 
