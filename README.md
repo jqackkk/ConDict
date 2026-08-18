@@ -5,6 +5,9 @@
 <h1>ConDict</h1>
 The Premier Dictionary Manager for Conlangers
 
+<h1>App Preview</h1>
+<img width="1920" height="1080" alt="ezgif com-gif-maker" src="https://github.com/user-attachments/assets/b9018557-f91b-4295-aaad-3b2d021c6503" />
+
 </div>
 
 > [!WARNING]
