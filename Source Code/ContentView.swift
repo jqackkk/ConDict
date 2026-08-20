@@ -38,7 +38,6 @@ struct ContentView: View {
     // Global Settings
     @AppStorage("selectedVoiceID") var selectedVoiceID: String = ""
     @AppStorage("appTheme") var appTheme: String = "System"
-    @AppStorage("selectedFont") var selectedFont: String = "System"
     
     @State private var selectedWord: Word?
     @State private var selectedFolder: Folder?
@@ -62,9 +61,10 @@ struct ContentView: View {
     
     var partsOfSpeech = ["All", "Noun", "Verb", "Adjective", "Adverb", "Pronoun", "Particle", "Conjunction", "Interjection", "Other"]
     
-    func getCustomFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        if selectedFont == "System" { return .system(size: size, weight: weight, design: .serif) }
-        else { return .custom(selectedFont, size: size).weight(weight) }
+    func getCustomFont(for fontName: String?, size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        let f = fontName ?? "System"
+        if f == "System" { return .system(size: size, weight: weight, design: .serif) }
+        else { return .custom(f, size: size).weight(weight) }
     }
     
     func getPlainText(from rtf: String) -> String {
@@ -197,7 +197,7 @@ struct ContentView: View {
             if showStatistics {
                 StatisticsDashboard(library: currentLibrary)
             } else if let word = selectedWord {
-                WordDetailContainer(word: word, selectedVoiceID: selectedVoiceID, selectedFont: selectedFont) { dest in selectedWord = dest }
+                WordDetailContainer(word: word, selectedVoiceID: selectedVoiceID, selectedFont: word.library?.fontName ?? "System") { dest in selectedWord = dest }
             } else {
                 ContentUnavailableView("Select a Word", systemImage: "book", description: Text("Select a word or view Statistics."))
             }
@@ -231,7 +231,7 @@ struct ContentView: View {
             selectedWord = nil
         }
         .sheet(isPresented: $isShowingAddSheet) {
-            AddWordView(targetFolder: selectedFolder, targetLibrary: currentLibrary, selectedFont: selectedFont).preferredColorScheme(colorScheme)
+            AddWordView(targetFolder: selectedFolder, targetLibrary: currentLibrary, selectedFont: currentLibrary?.fontName ?? "System").preferredColorScheme(colorScheme)
         }
         .sheet(isPresented: $isShowingFolderSheet) {
             NavigationStack {
@@ -323,7 +323,7 @@ struct ContentView: View {
             ForEach(filteredWords) { word in
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(word.term).font(getCustomFont(size: 16, weight: .bold))
+                        Text(word.term).font(getCustomFont(for: word.library?.fontName, size: 16, weight: .bold))
                         Text(getPlainText(from: word.definition)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer()
@@ -405,7 +405,13 @@ struct WordDetailContainer: View {
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Button(isEditing ? "Done" : "Edit") { withAnimation { isEditing.toggle() } }
+                Button(action: { withAnimation { isEditing.toggle() } }) {
+                    if isEditing {
+                        Text("Done")
+                    } else {
+                        Image(systemName: "pencil")
+                    }
+                }
             }
         }
     }

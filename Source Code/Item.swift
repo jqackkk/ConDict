@@ -91,6 +91,7 @@ final class InflectionSchema {
 final class Library {
     var name: String
     var createdAt: Date
+    var fontName: String = "System"
     
     @Relationship(deleteRule: .cascade, inverse: \Word.library)
     var words: [Word]? = []
